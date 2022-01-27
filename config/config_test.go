@@ -1,10 +1,13 @@
 package config
 
-import(
+import (
+	"fmt"
+	"github.com/stretchr/testify/require"
 	"testing"
 )
 
-func TestConfig(*testing.T){
-	config,_ := New(./config.yml)
-	fmt.printf("%v",config)
+func TestConfig(t *testing.T) {
+	config, err := New("../config.yml")
+	require.NoError(t, err)
+	fmt.Printf("%v", config)
 }
