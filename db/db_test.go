@@ -10,7 +10,7 @@ import (
 )
 
 func TestAccessDB(t *testing.T) {
-	db, err := NewDB("testdb1")
+	db, err := InitDB("testdb1")
 	require.NoError(t, err)
 
 	defer db.Close()

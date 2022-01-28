@@ -35,7 +35,7 @@ func NewSyncer(c *ethclient.Client, db *leveldb.DB, cfg *config.Config) *Syncer 
 }
 
 func (s *Syncer) Start() {
-	log.Info("syncer start")
+	//log.Info("syncer start")
 	fmt.Println("syncer start")
 	s.wg.Add(2)
 	go s.scanForAllBorrowers()
@@ -49,7 +49,6 @@ func (s *Syncer) Stop() {
 
 func (s *Syncer) scanForAllBorrowers() {
 	defer s.wg.Done()
-
 	t := time.NewTimer(0)
 	defer t.Stop()
 
@@ -84,7 +83,7 @@ func (s *Syncer) scanForAllBorrowers() {
 			}
 
 			log.Info("scanForAllBorrowers", "height to be handled", height, "currentHeight", currentHeight)
-			fmt.Printf("scanForAllBorrowers, height:%v, currentHeight:%v\n", height, currentHeight)
+			fmt.Printf("scanForAllBorrowers, height to be handled:%v, currentheight:%v\n", height, currentHeight)
 			blk, err := c.BlockByNumber(ctx, height)
 			if err != nil {
 				log.Info("fail to get block by number", "height", height, "error", err)
@@ -164,7 +163,7 @@ func (s *Syncer) scanForAllBorrowers() {
 			}
 
 		EndWithoutUpdateHeight:
-			t.Reset(time.Millisecond * 20)
+			t.Reset(time.Millisecond * 50)
 		}
 	}
 }

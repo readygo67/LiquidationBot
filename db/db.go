@@ -2,9 +2,11 @@ package dbm
 
 import (
 	leveldb "github.com/syndtr/goleveldb/leveldb"
+	"math/big"
 )
 
 const HashLength = 32
+const BeginHeight = 7463506
 
 // Hash to identify uniqueness
 type Hash [HashLength]byte
@@ -55,6 +57,9 @@ func LiquidationAbove3StoreKey(address []byte) []byte {
 	return append(LiquidationAbove3Prefix, address...)
 }
 
-func NewDB(path string) (*leveldb.DB, error) {
-	return leveldb.OpenFile(path, nil)
+func InitDB(path string) (*leveldb.DB, error) {
+	db, err := leveldb.OpenFile(path, nil)
+	panic(err)
+	db.Put(LastHandledHeightStoreKey(), big.NewInt(BeginHeight).Bytes(), nil)
+	return db, nil
 }
