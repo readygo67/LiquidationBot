@@ -7,9 +7,14 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/readygo67/LiquidationBot/config"
+	dbm "github.com/readygo67/LiquidationBot/db"
 	"github.com/stretchr/testify/require"
+	"github.com/syndtr/goleveldb/leveldb/util"
 	"math/big"
+	"os"
 	"testing"
+	"time"
 )
 
 func TestScaningBlockWithManualParse(t *testing.T) {
@@ -87,4 +92,46 @@ func TestFilterBorrowEvent(t *testing.T) {
 		require.NoError(t, err)
 		fmt.Printf("%v log: %s\n", i, jsonLog)
 	}
+}
+
+func TestScanAllBorrowers(t *testing.T) {
+	ctx := context.Background()
+
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	_, err = c.BlockNumber(ctx)
+	require.NoError(t, err)
+
+	sync := NewSyncer(c, db, cfg)
+	star := big.NewInt(14747565)
+	db.Put(dbm.KeyLastHandledHeight, star.Bytes(), nil)
+	db.Put(dbm.KeyBorrowerNumber, big.NewInt(0).Bytes(), nil)
+
+	sync.Start()
+	time.Sleep(time.Second * 120)
+	sync.Stop()
+
+	bz, err := db.Get(dbm.KeyLastHandledHeight, nil)
+	end := big.NewInt(0).SetBytes(bz)
+	t.Logf("end height:%v\n", end.Int64())
+
+	bz, err = db.Get(dbm.KeyBorrowerNumber, nil)
+	num := big.NewInt(0).SetBytes(bz).Int64()
+	t.Logf("num:%v\n", num)
+
+	iter := db.NewIterator(util.BytesPrefix(dbm.BorrowersPrefix), nil)
+	defer iter.Release()
+	t.Logf("borrows address")
+	for iter.Next() {
+		addr := common.BytesToAddress(iter.Value())
+		t.Logf("%v\n", addr.String())
+	}
+
 }

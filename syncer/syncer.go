@@ -3,15 +3,19 @@ package syncer
 import (
 	"context"
 	"fmt"
-	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/common"
+
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/readygo67/LiquidationBot/config"
+	"github.com/readygo67/LiquidationBot/db"
 	"github.com/syndtr/goleveldb/leveldb"
 	"math/big"
 	"sync"
 	"time"
 )
+
+const ConfirmHeight = 0
 
 type Syncer struct {
 	c      *ethclient.Client
@@ -21,7 +25,7 @@ type Syncer struct {
 	quitCh chan struct{}
 }
 
-func NewSyncer(c *ethclient.Client, db *leveldb.DB, cfg config.Config) *Syncer {
+func NewSyncer(c *ethclient.Client, db *leveldb.DB, cfg *config.Config) *Syncer {
 	return &Syncer{
 		c:      c,
 		db:     db,
@@ -30,29 +34,33 @@ func NewSyncer(c *ethclient.Client, db *leveldb.DB, cfg config.Config) *Syncer {
 	}
 }
 
-func (m *Syncer) Start() {
-	log.Info("monitor start")
-	m.wg.Add(1)
-	go m.scanning()
+func (s *Syncer) Start() {
+	log.Info("syncer start")
+	fmt.Println("syncer start")
+	s.wg.Add(2)
+	go s.scanForAllBorrowers()
+	go s.scanLiquidationBelow1P2()
 }
 
-func (m *Syncer) Stop() {
-	close(m.quitCh)
-	m.wg.Wait()
+func (s *Syncer) Stop() {
+	close(s.quitCh)
+	s.wg.Wait()
 }
 
-func (m *Syncer) scanning() {
-	defer m.wg.Done()
+func (s *Syncer) scanForAllBorrowers() {
+	defer s.wg.Done()
 
 	t := time.NewTimer(0)
 	defer t.Stop()
 
-	db := m.db
-	c := m.c
+	db := s.db
+	c := s.c
 	ctx := context.Background()
+	topicBorrow := "0x13ed6866d4e1ee6da46f845c46d7e54120883d75c5ea9a2dacc1c4ca8984ab80"
+
 	for {
 		select {
-		case <-m.quitCh:
+		case <-s.quitCh:
 			return
 
 		case <-t.C:
@@ -75,8 +83,8 @@ func (m *Syncer) scanning() {
 				continue
 			}
 
-			fmt.Println("scanning", "height to be handled", height, "currentHeight", currentHeight)
-			log.Info("scanning", "height to be handled", height, "currentHeight", currentHeight)
+			log.Info("scanForAllBorrowers", "height to be handled", height, "currentHeight", currentHeight)
+			fmt.Printf("scanForAllBorrowers, height:%v, currentHeight:%v\n", height, currentHeight)
 			blk, err := c.BlockByNumber(ctx, height)
 			if err != nil {
 				log.Info("fail to get block by number", "height", height, "error", err)
@@ -85,7 +93,6 @@ func (m *Syncer) scanning() {
 			}
 
 			if blk == nil {
-				fmt.Println("getting block is empty", "height", height)
 				log.Info("getting block is empty", "height", height)
 				t.Reset(time.Second * 3)
 				continue
@@ -93,47 +100,56 @@ func (m *Syncer) scanning() {
 
 			if len(blk.Transactions()) != 0 {
 				for _, tx := range blk.Transactions() {
+
 					if tx.To() == nil { //contract creation
 						continue
 					}
-					if tx.To().String() == contract {
-						receipt, err := c.TransactionReceipt(ctx, tx.Hash())
-						if err != nil {
-							log.Info("fail to get TransactionReceipt", "hash", tx.Hash(), "error", err)
-							goto EndWithoutUpdateHeight
-						}
 
-						for _, receiptlog := range receipt.Logs {
-							if receiptlog.Removed {
-								continue
+					for _, contract := range s.tokens {
+						if tx.To().String() == contract.Address {
+							receipt, err := c.TransactionReceipt(ctx, tx.Hash())
+							if err != nil {
+								log.Info("fail to get TransactionReceipt", "hash", tx.Hash(), "error", err)
+								goto EndWithoutUpdateHeight
 							}
 
-							if receiptlog.Address.String() == contract {
-								if receiptlog.Topics[0].String() == topic0 && receiptlog.Topics[1].String() == topic1 {
-									recipient := ethcmn.BytesToAddress(receiptlog.Topics[2].Bytes())
-									id := big.NewInt(0).SetBytes(receiptlog.Topics[3].Bytes()).Uint64()
-									log.Info("mint ", "receipt", recipient, "id", id)
+							for _, receiptlog := range receipt.Logs {
+								if receiptlog.Removed {
+									continue
+								}
 
-									exist, err := db.Has(dbm.HandledHashAndIDStoreKey(tx.Hash(), uint(id)), nil)
-									if err != nil {
-										log.Info("fail to get handled hash and id ", "hash", tx.Hash(), "id", id, "error", err)
-										goto EndWithoutUpdateHeight
+								if receiptlog.Address.String() == contract.Address {
+									if receiptlog.Topics[0].String() == topicBorrow {
+										borrower := receiptlog.Data[12:32]
+										//log.Info("height:%v, contract:%v, borrower:%+v\n", height, contract.Name, common.BytesToAddress(borrower))
+										fmt.Printf("height:%v, contract:%v, borrower:%+v\n", height, contract.Name, common.BytesToAddress(borrower))
+										exist, err := db.Has(dbm.BorrowersStoreKey(borrower), nil)
+										if err != nil {
+											goto EndWithoutUpdateHeight
+										}
+
+										if exist {
+											continue
+										}
+
+										err = db.Put(dbm.BorrowersStoreKey(borrower), borrower, nil)
+										if err != nil {
+											goto EndWithoutUpdateHeight
+										}
+
+										bz, err := db.Get(dbm.KeyBorrowerNumber, nil)
+										num := big.NewInt(0).SetBytes(bz).Int64()
+										fmt.Printf("borrower number:%v\n", num)
+										if err != nil {
+											goto EndWithoutUpdateHeight
+										}
+
+										num += 1
+										err = db.Put(dbm.KeyBorrowerNumber, big.NewInt(num).Bytes(), nil)
+										if err != nil {
+											goto EndWithoutUpdateHeight
+										}
 									}
-
-									if exist {
-										continue
-									}
-
-									seed := crypto.Keccak256Hash(recipient.Bytes(), tx.GasPrice().Bytes(), blk.Number().Bytes(), big.NewInt(int64(blk.Time())).Bytes(), blk.ParentHash().Bytes(), big.NewInt(int64(id)).Bytes())
-									seedUint64 := seed.Big().Uint64()
-
-									err = dbm.AllocateOneWithCheck(db, tx.Hash(), uint(id), recipient, uint(seedUint64))
-									if err != nil {
-										log.Error("fail to AllocateOneWithCheck", "hash", tx.Hash(), "id", id, "recipient", recipient, "seed", seedUint64, "err", err)
-										goto EndWithoutUpdateHeight
-									}
-									log.Info("success AllocateOneWithCheck", "hash", tx.Hash(), "id", id, "recipient", recipient, "seed", seedUint64)
-									fmt.Println("success AllocateOneWithCheck", "hash", tx.Hash(), "id", id, "recipient", recipient, "seed", seedUint64)
 								}
 							}
 						}
@@ -148,7 +164,23 @@ func (m *Syncer) scanning() {
 			}
 
 		EndWithoutUpdateHeight:
-			t.Reset(time.Millisecond * 50)
+			t.Reset(time.Millisecond * 20)
+		}
+	}
+}
+
+func (s *Syncer) scanLiquidationBelow1P2() {
+	defer s.wg.Done()
+
+	t := time.NewTimer(0)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-s.quitCh:
+			return
+		case <-t.C:
+			t.Reset(time.Second * 50)
 		}
 	}
 }
