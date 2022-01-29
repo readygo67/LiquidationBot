@@ -12,5 +12,5 @@ func TestConfig(t *testing.T) {
 	for _, token := range config.Tokens {
 		fmt.Printf("name:%v, address:%v\n", token.Name, token.Address)
 	}
-	fmt.Printf("db:%+v", config.DB)
+	fmt.Printf("db:%+v\n", config.DB)
 }
