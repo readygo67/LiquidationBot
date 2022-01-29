@@ -3,7 +3,12 @@ package syncer
 import (
 	"context"
 	"fmt"
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/readygo67/LiquidationBot/venus"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
@@ -16,6 +21,7 @@ import (
 )
 
 const ConfirmHeight = 0
+const ScanSpan = 10000
 
 type Syncer struct {
 	c      *ethclient.Client
@@ -32,6 +38,7 @@ func NewSyncer(c *ethclient.Client, db *leveldb.DB, cfg *config.Config) *Syncer 
 		tokens: cfg.Tokens,
 		quitCh: make(chan struct{}),
 	}
+
 }
 
 func (s *Syncer) Start() {
@@ -49,14 +56,22 @@ func (s *Syncer) Stop() {
 
 func (s *Syncer) scanForAllBorrowers() {
 	defer s.wg.Done()
-
-	t := time.NewTimer(0)
-	defer t.Stop()
-
 	db := s.db
 	c := s.c
 	ctx := context.Background()
-	topicBorrow := "0x13ed6866d4e1ee6da46f845c46d7e54120883d75c5ea9a2dacc1c4ca8984ab80"
+
+	topicBorrow := common.HexToHash("0x13ed6866d4e1ee6da46f845c46d7e54120883d75c5ea9a2dacc1c4ca8984ab80")
+	vbep20Abi, _ := abi.JSON(strings.NewReader(venus.Vbep20MetaData.ABI))
+	var logs []types.Log
+	var addresses []common.Address
+	name := make(map[string]string)
+	for _, token := range s.tokens {
+		addresses = append(addresses, common.HexToAddress(token.Address))
+		name[strings.ToLower(token.Address)] = token.Name
+	}
+
+	t := time.NewTimer(0)
+	defer t.Stop()
 
 	for {
 		select {
@@ -64,101 +79,82 @@ func (s *Syncer) scanForAllBorrowers() {
 			return
 
 		case <-t.C:
-			bz, err := db.Get(dbm.LastHandledHeightStoreKey(), nil)
-			if err != nil {
-				t.Reset(time.Second * 3)
-				continue
-			}
-
 			currentHeight, err := c.BlockNumber(ctx)
 			if err != nil {
 				t.Reset(time.Second * 3)
 				continue
 			}
 
-			lastHandledHeight := big.NewInt(0).SetBytes(bz)
-			height := big.NewInt(0).Add(lastHandledHeight, big.NewInt(1))
-			if height.Uint64()+ConfirmHeight >= currentHeight {
-				t.Reset(time.Second * 3)
-				continue
-			}
-
-			log.Info("scanForAllBorrowers", "height to be handled", height, "currentHeight", currentHeight)
-			fmt.Printf("scanForAllBorrowers, height:%v, currentHeight:%v\n", height, currentHeight)
-			blk, err := c.BlockByNumber(ctx, height)
+			bz, err := db.Get(dbm.LastHandledHeightStoreKey(), nil)
 			if err != nil {
-				log.Info("fail to get block by number", "height", height, "error", err)
+				t.Reset(time.Millisecond * 20)
+				continue
+			}
+			lastHandledHeight := big.NewInt(0).SetBytes(bz).Uint64()
+
+			startHeight := lastHandledHeight + 1
+			endHeight := currentHeight
+			if startHeight+ConfirmHeight >= currentHeight {
 				t.Reset(time.Second * 3)
 				continue
 			}
 
-			if blk == nil {
-				log.Info("getting block is empty", "height", height)
-				t.Reset(time.Second * 3)
-				continue
+			if currentHeight-lastHandledHeight >= ScanSpan {
+				endHeight = startHeight + ScanSpan - 1
+			}
+			fmt.Printf("startHeight:%v, endHeight:%v\n", startHeight, endHeight)
+			query := ethereum.FilterQuery{
+				FromBlock: big.NewInt(int64(startHeight)),
+				ToBlock:   big.NewInt(int64(endHeight)),
+				Addresses: addresses,
+				Topics:    [][]common.Hash{{topicBorrow}},
 			}
 
-			if len(blk.Transactions()) != 0 {
-				for _, tx := range blk.Transactions() {
+			logs, err = c.FilterLogs(context.Background(), query)
+			if err != nil {
+				goto EndWithoutUpdateHeight
+			}
 
-					if tx.To() == nil { //contract creation
-						continue
-					}
+			for i, log := range logs {
+				var borrowEvent venus.Vbep20Borrow
+				err = vbep20Abi.UnpackIntoInterface(&borrowEvent, "Borrow", log.Data)
+				fmt.Printf("%v height:%v, name:%v borrower:%v\n", (i + 1), log.BlockNumber, name[strings.ToLower(log.Address.String())], borrowEvent.Borrower)
 
-					for _, contract := range s.tokens {
-						if tx.To().String() == contract.Address {
-							receipt, err := c.TransactionReceipt(ctx, tx.Hash())
-							if err != nil {
-								log.Info("fail to get TransactionReceipt", "hash", tx.Hash(), "error", err)
-								goto EndWithoutUpdateHeight
-							}
+				borrowerBytes := borrowEvent.Borrower.Bytes()
+				exist, err := db.Has(dbm.BorrowersStoreKey(borrowerBytes), nil)
+				if err != nil {
+					goto EndWithoutUpdateHeight
+				}
 
-							for _, receiptlog := range receipt.Logs {
-								if receiptlog.Removed {
-									continue
-								}
+				if exist {
+					continue
+				}
 
-								if receiptlog.Address.String() == contract.Address {
-									if receiptlog.Topics[0].String() == topicBorrow {
-										borrower := receiptlog.Data[12:32]
-										//log.Info("height:%v, contract:%v, borrower:%+v\n", height, contract.Name, common.BytesToAddress(borrower))
-										fmt.Printf("height:%v, contract:%v, borrower:%+v\n", height, contract.Name, common.BytesToAddress(borrower))
-										exist, err := db.Has(dbm.BorrowersStoreKey(borrower), nil)
-										if err != nil {
-											goto EndWithoutUpdateHeight
-										}
+				byteCode, err := c.CodeAt(ctx, log.Address, big.NewInt(int64(log.BlockNumber)))
+				if len(byteCode) > 0 {
+					//a smart contract
+					continue
+				}
 
-										if exist {
-											continue
-										}
+				err = db.Put(dbm.BorrowersStoreKey(borrowerBytes), borrowerBytes, nil)
+				if err != nil {
+					goto EndWithoutUpdateHeight
+				}
 
-										err = db.Put(dbm.BorrowersStoreKey(borrower), borrower, nil)
-										if err != nil {
-											goto EndWithoutUpdateHeight
-										}
+				bz, err := db.Get(dbm.KeyBorrowerNumber, nil)
+				num := big.NewInt(0).SetBytes(bz).Int64()
+				if err != nil {
+					goto EndWithoutUpdateHeight
+				}
 
-										bz, err := db.Get(dbm.KeyBorrowerNumber, nil)
-										num := big.NewInt(0).SetBytes(bz).Int64()
-										fmt.Printf("borrower number:%v\n", num)
-										if err != nil {
-											goto EndWithoutUpdateHeight
-										}
-
-										num += 1
-										err = db.Put(dbm.KeyBorrowerNumber, big.NewInt(num).Bytes(), nil)
-										if err != nil {
-											goto EndWithoutUpdateHeight
-										}
-									}
-								}
-							}
-						}
-					}
+				num += 1
+				err = db.Put(dbm.KeyBorrowerNumber, big.NewInt(num).Bytes(), nil)
+				if err != nil {
+					goto EndWithoutUpdateHeight
 				}
 			}
 
-			lastHandledHeight = big.NewInt(0).Add(lastHandledHeight, big.NewInt(1))
-			err = db.Put(dbm.LastHandledHeightStoreKey(), lastHandledHeight.Bytes(), nil)
+			err = db.Put(dbm.LastHandledHeightStoreKey(), big.NewInt(int64(endHeight)).Bytes(), nil)
 			if err != nil {
 				goto EndWithoutUpdateHeight
 			}
