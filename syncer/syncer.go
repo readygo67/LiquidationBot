@@ -23,28 +23,47 @@ import (
 const ConfirmHeight = 0
 const ScanSpan = 10000
 
+type TokenInfo struct {
+	Address               common.Address
+	CollateralFactorFloat *big.Float
+	PriceFloat            *big.Float
+}
+
+var (
+	ExpScaleFloat, _ = big.NewFloat(0).SetString("1000000000000000000")
+	AddressToSymbol  = make(map[common.Address]string)
+	TokenDetail      = make(map[string]TokenInfo)
+)
+
 type Syncer struct {
-	c      *ethclient.Client
-	db     *leveldb.DB
-	wg     sync.WaitGroup
-	tokens []config.Token
-	quitCh chan struct{}
+	c                *ethclient.Client
+	db               *leveldb.DB
+	cfg              *config.Config
+	wg               sync.WaitGroup
+	quitCh           chan struct{}
+	forceUpdtePrices chan struct{}
 }
 
 func NewSyncer(c *ethclient.Client, db *leveldb.DB, cfg *config.Config) *Syncer {
 	return &Syncer{
-		c:      c,
-		db:     db,
-		tokens: cfg.Tokens,
-		quitCh: make(chan struct{}),
+		c:                c,
+		db:               db,
+		cfg:              cfg,
+		quitCh:           make(chan struct{}),
+		forceUpdtePrices: make(chan struct{}),
 	}
-
 }
 
 func (s *Syncer) Start() {
 	log.Info("syncer start")
 	fmt.Println("syncer start")
-	s.wg.Add(2)
+	err := s.doSyncMarketsAndPrices()
+	if err != nil {
+		panic(err)
+	}
+
+	s.wg.Add(3)
+	go s.syncMarketsAndPrices()
 	go s.scanForAllBorrowers()
 	go s.scanLiquidationBelow1P2()
 }
@@ -62,17 +81,15 @@ func (s *Syncer) scanForAllBorrowers() {
 
 	topicBorrow := common.HexToHash("0x13ed6866d4e1ee6da46f845c46d7e54120883d75c5ea9a2dacc1c4ca8984ab80")
 	vbep20Abi, _ := abi.JSON(strings.NewReader(venus.Vbep20MetaData.ABI))
+
 	var logs []types.Log
 	var addresses []common.Address
-	name := make(map[string]string)
-	for _, token := range s.tokens {
-		addresses = append(addresses, common.HexToAddress(token.Address))
-		name[strings.ToLower(token.Address)] = token.Name
+	for _, detail := range TokenDetail {
+		addresses = append(addresses, detail.Address)
 	}
 
 	t := time.NewTimer(0)
 	defer t.Stop()
-
 	for {
 		select {
 		case <-s.quitCh:
@@ -141,6 +158,8 @@ func (s *Syncer) scanForAllBorrowers() {
 					goto EndWithoutUpdateHeight
 				}
 
+				//calculate the health factor
+
 				bz, err := db.Get(dbm.KeyBorrowerNumber, nil)
 				num := big.NewInt(0).SetBytes(bz).Int64()
 				if err != nil {
@@ -165,6 +184,94 @@ func (s *Syncer) scanForAllBorrowers() {
 	}
 }
 
+func (s *Syncer) calculateHealthFactor(account common.Address) (*big.Float, *big.Float, *big.Float, error) {
+	comptroller, err := venus.NewComptroller(common.HexToAddress(s.cfg.Comptroller), s.c)
+	if err != nil {
+		return big.NewFloat(0), big.NewFloat(0), big.NewFloat(0), err
+	}
+
+	oracle, err := venus.NewOracle(common.HexToAddress(s.cfg.Oracle), s.c)
+	if err != nil {
+		return big.NewFloat(0), big.NewFloat(0), big.NewFloat(0), err
+	}
+
+	fmt.Printf("account:%v\n", account)
+	_, liquidity, shortfall, err := comptroller.GetAccountLiquidity(nil, account)
+	if err != nil {
+		return big.NewFloat(0), big.NewFloat(0), big.NewFloat(0), err
+	}
+
+	assets, err := comptroller.GetAssetsIn(nil, account)
+	if err != nil {
+		return big.NewFloat(0), big.NewFloat(0), big.NewFloat(0), err
+	}
+
+	totalCollateral := big.NewFloat(0)
+	totalLoan := big.NewFloat(0)
+	mintVAIS, err := comptroller.MintedVAIs(nil, account)
+
+	mintVAISFloatExp := big.NewFloat(0).SetInt(mintVAIS)
+	mintVAISFloat := big.NewFloat(0).Quo(mintVAISFloatExp, ExpScaleFloat)
+
+	fmt.Printf("mintVAI:%v\n", mintVAIS)
+	for _, asset := range assets {
+		//fmt.Printf("asset:%v\n", asset)
+		marketInfo, err := comptroller.Markets(nil, asset)
+		collateralFactor := marketInfo.CollateralFactorMantissa
+
+		token, err := venus.NewVbep20(asset, s.c)
+
+		_, balance, borrow, exchangeRate, err := token.GetAccountSnapshot(nil, common.HexToAddress(account))
+
+		price, err := oracle.GetUnderlyingPrice(nil, asset)
+		if price == big.NewInt(0) {
+			continue
+		}
+		//fmt.Printf("collateralFactor:%v, price:%v, exchangeRate:%v, balance:%v, borrow:%v\n", collateralFactor, price, exchangeRate, balance, borrow)
+
+		exchangeRateFloatExp := big.NewFloat(0).SetInt(exchangeRate)
+		exchangeRateFloat := big.NewFloat(0).Quo(exchangeRateFloatExp, ExpScaleFloat)
+
+		collateralFactorFloatExp := big.NewFloat(0).SetInt(collateralFactor)
+		collateralFactorFloat := big.NewFloat(0).Quo(collateralFactorFloatExp, ExpScaleFloat)
+
+		priceFloatExp := big.NewFloat(0).SetInt(price)
+		priceFloat := big.NewFloat(0).Quo(priceFloatExp, ExpScaleFloat)
+
+		multiplier := big.NewFloat(0).Mul(exchangeRateFloat, collateralFactorFloat)
+		multiplier = big.NewFloat(0).Mul(multiplier, priceFloat)
+
+		balanceFloatExp := big.NewFloat(0).SetInt(balance)
+		balanceFloat := big.NewFloat(0).Quo(balanceFloatExp, ExpScaleFloat)
+		collateral := big.NewFloat(0).Mul(balanceFloat, multiplier)
+		totalCollateral = big.NewFloat(0).Add(totalCollateral, collateral)
+
+		borrowFloatExp := big.NewFloat(0).SetInt(borrow)
+		borrowFloat := big.NewFloat(0).Quo(borrowFloatExp, ExpScaleFloat)
+		loan := big.NewFloat(0).Mul(borrowFloat, priceFloat)
+		totalLoan = big.NewFloat(0).Add(totalLoan, loan)
+	}
+
+	totalLoan = big.NewFloat(0).Add(totalLoan, mintVAISFloat)
+	fmt.Printf("totalCollateral:%v, totalLoan:%v\n", totalCollateral, totalLoan)
+	healthFactor := big.NewFloat(0).Quo(totalCollateral, totalLoan)
+	fmt.Printf("healthFactor：%v\n", healthFactor)
+
+	calculatedLiquidity := big.NewFloat(0)
+	calculatedShortfall := big.NewFloat(0)
+	if totalLoan.Cmp(totalCollateral) == 1 {
+		calculatedShortfall = big.NewFloat(0).Sub(totalLoan, totalCollateral)
+	} else {
+		calculatedLiquidity = big.NewFloat(0).Sub(totalCollateral, totalLoan)
+	}
+
+	fmt.Printf("liquidity:%v, calculatedLiquidity:%v\n", liquidity, calculatedLiquidity)
+	fmt.Printf("shortfall:%v, calculatedShortfall:%v\n", shortfall, calculatedShortfall)
+
+	return healthFactor, totalCollateral, totalLoan, nil
+
+}
+
 func (s *Syncer) scanLiquidationBelow1P2() {
 	defer s.wg.Done()
 
@@ -179,4 +286,74 @@ func (s *Syncer) scanLiquidationBelow1P2() {
 			t.Reset(time.Second * 50)
 		}
 	}
+}
+func (s *Syncer) syncMarketsAndPrices() {
+	defer s.wg.Done()
+	t := time.NewTimer(0)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-s.quitCh:
+			return
+		case <-t.C:
+			s.doSyncMarketsAndPrices()
+		case <-s.forceUpdtePrices:
+			s.doSyncMarketsAndPrices()
+		}
+	}
+}
+
+func (s *Syncer) doSyncMarketsAndPrices() error {
+	comptroller, err := venus.NewComptroller(common.HexToAddress(s.cfg.Comptroller), s.c)
+	if err != nil {
+		return err
+	}
+
+	oracle, err := venus.NewOracle(common.HexToAddress(s.cfg.Oracle), s.c)
+	if err != nil {
+		return err
+	}
+
+	markets, err := comptroller.GetAllMarkets(nil)
+	if err != nil {
+		return err
+	}
+
+	for _, market := range markets {
+		vbep20, err := venus.NewVbep20(market, s.c)
+		if err != nil {
+			return err
+		}
+		symbol, err := vbep20.Symbol(nil)
+		if err != nil {
+			return err
+		}
+
+		marketDetail, err := comptroller.Markets(nil, market)
+		if err != nil {
+			return err
+		}
+
+		price, err := oracle.GetUnderlyingPrice(nil, market)
+		if err != nil {
+			return err
+		}
+
+		collateralFactorFloatExp := big.NewFloat(0).SetInt(marketDetail.CollateralFactorMantissa)
+		collateralFactorFloat := big.NewFloat(0).Quo(collateralFactorFloatExp, ExpScaleFloat)
+
+		priceFloatExp := big.NewFloat(0).SetInt(price)
+		priceFloat := big.NewFloat(0).Quo(priceFloatExp, ExpScaleFloat)
+
+		tokenDetail := TokenInfo{
+			Address:               market,
+			CollateralFactorFloat: collateralFactorFloat,
+			PriceFloat:            priceFloat,
+		}
+
+		TokenDetail[symbol] = tokenDetail
+		AddressToSymbol[market] = symbol
+	}
+	return nil
 }
