@@ -646,7 +646,9 @@ func (s *Syncer) syncAccounts(accounts []common.Address) {
 	var wg sync.WaitGroup
 	wg.Add(len(accounts))
 	sem := make(semaphore, runtime.NumCPU())
-	for _, account := range accounts {
+
+	for _, account_ := range accounts {
+		account := account_
 		sem.Acquire()
 		go func() {
 			defer sem.Release()
@@ -683,7 +685,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 	}
 
 	for _, market := range markets {
-		fmt.Printf("market:%v\n", market)
+		//fmt.Printf("market:%v\n", market)
 		_, balance, borrow, exchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
 		if err != nil {
 			fmt.Printf("syncOneAccount, fail to get GetAccountSnapshot, err:%v\n", err)

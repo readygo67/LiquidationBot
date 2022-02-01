@@ -479,7 +479,7 @@ func TestStoreAndDeleteAccount1(t *testing.T) {
 //	require.Equal(t, "202001285536565656590891932", rateExp.String())
 //}
 //
-func TestScanOneAccount(t *testing.T) {
+func TestSyncOneAccount(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
@@ -545,7 +545,95 @@ func TestScanOneAccount(t *testing.T) {
 	require.Equal(t, account, common.BytesToAddress(bz))
 }
 
-func TestScanOneAccountWithIncreaseAccountNumer(t *testing.T) {
+func TestSyncAccounts(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle)
+	accountStrs := []string{
+		"0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B",
+		"0x332E2Dcd239Bb40d4eb31bcaE213F9F06017a4F3",
+		"0xc528045078Ff53eA289fA42aF3e12D8eF901cABD",
+		"0xF2ddE5689B0e13344231D3459B03432E97a48E0c",
+	}
+	var accounts []common.Address
+	for _, accountStr := range accountStrs {
+		accounts = append(accounts, common.HexToAddress(accountStr))
+	}
+
+	sync.syncAccounts(accounts)
+	require.NoError(t, err)
+
+	count := make(map[string]int)
+
+	for _, account := range accounts {
+		accountBytes := account.Bytes()
+		bz, err := db.Get(dbm.BorrowersStoreKey(accountBytes), nil)
+		require.NoError(t, err)
+		require.Equal(t, account, common.BytesToAddress(bz))
+
+		bz, err = db.Get(dbm.AccountStoreKey(accountBytes), nil)
+		require.NoError(t, err)
+
+		var got AccountInfo
+		err = json.Unmarshal(bz, &got)
+		require.NoError(t, err)
+
+		for _, token := range got.Assets {
+			count[token.Symbol] += 1
+			bz, err = db.Get(dbm.MarketStoreKey([]byte(token.Symbol), accountBytes), nil)
+			require.NoError(t, err)
+			require.Equal(t, account, common.BytesToAddress(bz))
+		}
+	}
+
+	//total account number = 4
+	gotAccounts := []common.Address{}
+	iter := db.NewIterator(util.BytesPrefix(dbm.BorrowersPrefix), nil)
+	for iter.Next() {
+		gotAccounts = append(gotAccounts, common.BytesToAddress(iter.Value()))
+	}
+	require.Equal(t, 4, len(gotAccounts))
+
+	for symbol, cnt := range count {
+		prefix := append(dbm.MarketPrefix, []byte(symbol)...)
+		gotAccounts = []common.Address{}
+		iter = db.NewIterator(util.BytesPrefix(prefix), nil)
+		for iter.Next() {
+			gotAccounts = append(gotAccounts, common.BytesToAddress(iter.Value()))
+		}
+		require.Equal(t, cnt, len(gotAccounts))
+	}
+
+	gotAccounts = []common.Address{}
+	iter = db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P5Prefix), nil)
+	for iter.Next() {
+		gotAccounts = append(gotAccounts, common.BytesToAddress(iter.Value()))
+	}
+	require.Equal(t, 2, len(gotAccounts))
+
+	gotAccounts = []common.Address{}
+	iter = db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow3P0Prefix), nil)
+	for iter.Next() {
+		gotAccounts = append(gotAccounts, common.BytesToAddress(iter.Value()))
+	}
+	require.Equal(t, 1, len(gotAccounts))
+
+	gotAccounts = []common.Address{}
+	iter = db.NewIterator(util.BytesPrefix(dbm.LiquidationAbove3P0Prefix), nil)
+	for iter.Next() {
+		gotAccounts = append(gotAccounts, common.BytesToAddress(iter.Value()))
+	}
+	require.Equal(t, 1, len(gotAccounts))
+}
+
+func TestSyncOneAccountWithIncreaseAccountNumer(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
@@ -615,7 +703,7 @@ func TestScanOneAccountWithIncreaseAccountNumer(t *testing.T) {
 	require.Equal(t, account, common.BytesToAddress(bz))
 }
 
-func TestScanOneAccountWithFeededPrices(t *testing.T) {
+func TestSyncOneAccountWithFeededPrices(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
