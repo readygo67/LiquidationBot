@@ -5,17 +5,12 @@ import (
 	"io/ioutil"
 )
 
-type Token struct {
-	Name    string `yaml:"name"`
-	Address string `yaml:"address"`
-}
-
 type Config struct {
-	RPCURL      string  `yaml:"rpc_url"`
-	Network     string  `yaml:"network"`
-	Comptroller string  `yaml:"comptroller"`
-	Tokens      []Token `yaml:"tokens"`
-	DB          string  `yaml:"db"`
+	RPCURL      string `yaml:"rpc_url"`
+	Network     string `yaml:"network"`
+	Oracle      string `yaml:"oracle"`
+	Comptroller string `yaml:"comptroller"`
+	DB          string `yaml:"db"`
 }
 
 // Setup init config
