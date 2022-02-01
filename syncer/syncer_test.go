@@ -456,29 +456,29 @@ func TestStoreAndDeleteAccount1(t *testing.T) {
 	}
 }
 
-//// 从compound通过getExchangeRateStored方法获得的exchangeRat是乘了10^18的结果，实际使用时需要除10^18,
-//func TestCalculateExchangeRate(t *testing.T) {
-//	//exchangeRateStored: 202001285536565656590891932
-//	//totalSupply: 76384766592957
-//	//totalBorrow: 2298168762317337651162
-//	//totalReserver:  4713643651873292071
-//	//cash: 13136365928522364031146
-//	borrow, _ := big.NewInt(0).SetString("2298168762317337651162", 10)
-//	supply, _ := big.NewInt(0).SetString("76384766592957", 10)
-//	reserve, _ := big.NewInt(0).SetString("4713643651873292071", 10)
-//	cash, _ := big.NewInt(0).SetString("13136365928522364031146", 10)
-//	sum := big.NewInt(0).Add(cash, borrow)
-//	sum = big.NewInt(0).Sub(sum, reserve)
-//	//rate := big.NewInt(0).Div(sum, supply)
-//	//fmt.Printf("rate:%v\n", rate)
-//
-//	ExpScale, _ := big.NewInt(0).SetString("1000000000000000000", 10)
-//	sumExp := big.NewInt(0).Mul(sum, ExpScale)
-//	rateExp := big.NewInt(0).Div(sumExp, supply)
-//	//fmt.Printf("rateExp:%v\n", rateExp)
-//	require.Equal(t, "202001285536565656590891932", rateExp.String())
-//}
-//
+// 从compound通过getExchangeRateStored方法获得的exchangeRat是乘了10^18的结果，实际使用时需要除10^18,
+func TestCalculateExchangeRate(t *testing.T) {
+	//exchangeRateStored: 202001285536565656590891932
+	//totalSupply: 76384766592957
+	//totalBorrow: 2298168762317337651162
+	//totalReserver:  4713643651873292071
+	//cash: 13136365928522364031146
+	borrow, _ := big.NewInt(0).SetString("2298168762317337651162", 10)
+	supply, _ := big.NewInt(0).SetString("76384766592957", 10)
+	reserve, _ := big.NewInt(0).SetString("4713643651873292071", 10)
+	cash, _ := big.NewInt(0).SetString("13136365928522364031146", 10)
+	sum := big.NewInt(0).Add(cash, borrow)
+	sum = big.NewInt(0).Sub(sum, reserve)
+	//rate := big.NewInt(0).Div(sum, supply)
+	//fmt.Printf("rate:%v\n", rate)
+
+	ExpScale, _ := big.NewInt(0).SetString("1000000000000000000", 10)
+	sumExp := big.NewInt(0).Mul(sum, ExpScale)
+	rateExp := big.NewInt(0).Div(sumExp, supply)
+	//fmt.Printf("rateExp:%v\n", rateExp)
+	require.Equal(t, "202001285536565656590891932", rateExp.String())
+}
+
 func TestSyncOneAccount(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
@@ -820,46 +820,45 @@ func TestSyncOneAccountWithFeededPrices(t *testing.T) {
 //	}
 //}
 //
-//func TestScanAllBorrowers1(t *testing.T) {
-//	ctx := context.Background()
-//
-//	cfg, err := config.New("../config.yml")
-//	rpcURL := "http://42.3.146.198:21993"
-//	c, err := ethclient.Dial(rpcURL)
-//
-//	db, err := dbm.NewDB("testdb1")
-//	require.NoError(t, err)
-//	defer db.Close()
-//	defer os.RemoveAll("testdb1")
-//
-//	height, err := c.BlockNumber(ctx)
-//	require.NoError(t, err)
-//
-//	sync := NewSyncer(c, db, cfg)
-//	star := big.NewInt(int64(height - 5000))
-//	db.Put(dbm.KeyLastHandledHeight, star.Bytes(), nil)
-//	db.Put(dbm.KeyBorrowerNumber, big.NewInt(0).Bytes(), nil)
-//
-//	sync.Start()
-//	time.Sleep(time.Second * 15)
-//	sync.Stop()
-//
-//	bz, err := db.Get(dbm.KeyLastHandledHeight, nil)
-//	end := big.NewInt(0).SetBytes(bz)
-//	t.Logf("end height:%v\n", end.Int64())
-//
-//	bz, err = db.Get(dbm.KeyBorrowerNumber, nil)
-//	num := big.NewInt(0).SetBytes(bz).Int64()
-//	t.Logf("num:%v\n", num)
-//
-//	iter := db.NewIterator(util.BytesPrefix(dbm.BorrowersPrefix), nil)
-//	defer iter.Release()
-//	t.Logf("borrows address")
-//	for iter.Next() {
-//		addr := common.BytesToAddress(iter.Value())
-//		t.Logf("%v\n", addr.String())
-//	}
-//}
+func TestScanAllBorrowers1(t *testing.T) {
+	ctx := context.Background()
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	height, err := c.BlockNumber(ctx)
+	require.NoError(t, err)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle)
+	startHeight := big.NewInt(int64(height - 5000))
+	db.Put(dbm.KeyLastHandledHeight, startHeight.Bytes(), nil)
+	db.Put(dbm.KeyBorrowerNumber, big.NewInt(0).Bytes(), nil)
+
+	sync.Start()
+	time.Sleep(time.Second * 60)
+	sync.Stop()
+
+	bz, err := db.Get(dbm.KeyLastHandledHeight, nil)
+	end := big.NewInt(0).SetBytes(bz)
+	t.Logf("end height:%v\n", end.Int64())
+
+	bz, err = db.Get(dbm.KeyBorrowerNumber, nil)
+	num := big.NewInt(0).SetBytes(bz).Int64()
+	t.Logf("num:%v\n", num)
+
+	iter := db.NewIterator(util.BytesPrefix(dbm.BorrowersPrefix), nil)
+	defer iter.Release()
+	t.Logf("borrows address")
+	for iter.Next() {
+		addr := common.BytesToAddress(iter.Value())
+		t.Logf("%v\n", addr.String())
+	}
+}
 
 func verifyTokens(t *testing.T, sync *Syncer) {
 	require.Equal(t, common.HexToAddress("0xf508fCD89b8bd15579dc79A6827cB4686A3592c8"), sync.tokens["vETH"].Address)
