@@ -24,6 +24,10 @@ var (
 	LiquidationAbove3P0Prefix = []byte("liquidation_above_3p0")
 )
 
+func BorrowerNumberKey() []byte {
+	return KeyBorrowerNumber
+}
+
 func LastHandledHeightStoreKey() []byte {
 	return KeyLastHandledHeight
 }
