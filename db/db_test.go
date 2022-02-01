@@ -33,10 +33,10 @@ func TestAccessDB(t *testing.T) {
 	}
 
 	for i := 10; i < 20; i++ {
-		db.Put(LiquidationBelow1StoreKey([]byte(fmt.Sprintf("account%v", i))), []byte(fmt.Sprintf("account%v", i)), nil)
+		db.Put(LiquidationBelow1P0StoreKey([]byte(fmt.Sprintf("account%v", i))), []byte(fmt.Sprintf("account%v", i)), nil)
 	}
 
-	iter1 := db.NewIterator(util.BytesPrefix(LiquidationBelow1Prefix), nil)
+	iter1 := db.NewIterator(util.BytesPrefix(LiquidationBelow1P0Prefix), nil)
 	defer iter1.Release()
 	t.Logf("liquidation below 1 address")
 	for iter1.Next() {

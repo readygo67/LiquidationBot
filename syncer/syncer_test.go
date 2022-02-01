@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -11,6 +12,7 @@ import (
 	dbm "github.com/readygo67/LiquidationBot/db"
 	"github.com/readygo67/LiquidationBot/venus"
 	"github.com/stretchr/testify/require"
+	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"math/big"
 	"os"
@@ -258,7 +260,8 @@ func TestCalculateHealthFactor1(t *testing.T) {
 	}
 
 	accounts := []string{
-		"0x332E2Dcd239Bb40d4eb31bcaE213F9F06017a4F3",
+		"0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B",
+		//"0x332E2Dcd239Bb40d4eb31bcaE213F9F06017a4F3",
 		//"0xc528045078Ff53eA289fA42aF3e12D8eF901cABD",
 		//"0xF2ddE5689B0e13344231D3459B03432E97a48E0c",
 	}
@@ -279,7 +282,7 @@ func TestCalculateHealthFactor1(t *testing.T) {
 		mintVAISFloatExp := big.NewFloat(0).SetInt(mintVAIS)
 		mintVAISFloat := big.NewFloat(0).Quo(mintVAISFloatExp, ExpScaleFloat)
 
-		fmt.Printf("mintVAI:%v\n", mintVAIS)
+		//fmt.Printf("mintVAI:%v\n", mintVAIS)
 		require.NoError(t, err)
 
 		for _, asset := range assets {
@@ -297,7 +300,7 @@ func TestCalculateHealthFactor1(t *testing.T) {
 			if price == big.NewInt(0) {
 				continue
 			}
-			//fmt.Printf("collateralFactor:%v, price:%v, exchangeRate:%v, balance:%v, borrow:%v\n", collateralFactor, price, exchangeRate, balance, borrow)
+			fmt.Printf("collateralFactor:%v, price:%v, exchangeRate:%v, balance:%v, borrow:%v\n", collateralFactor, price, exchangeRate, balance, borrow)
 
 			exchangeRateFloatExp := big.NewFloat(0).SetInt(exchangeRate)
 			exchangeRateFloat := big.NewFloat(0).Quo(exchangeRateFloatExp, ExpScaleFloat)
@@ -313,17 +316,21 @@ func TestCalculateHealthFactor1(t *testing.T) {
 
 			balanceFloatExp := big.NewFloat(0).SetInt(balance)
 			balanceFloat := big.NewFloat(0).Quo(balanceFloatExp, ExpScaleFloat)
-			collateral := big.NewFloat(0).Mul(balanceFloat, multiplier)
-			totalCollateral = big.NewFloat(0).Add(totalCollateral, collateral)
 
 			borrowFloatExp := big.NewFloat(0).SetInt(borrow)
 			borrowFloat := big.NewFloat(0).Quo(borrowFloatExp, ExpScaleFloat)
+
+			fmt.Printf("collateralFactor:%v, price:%v, exchangeRate:%v, balance:%v, borrow:%v\n", collateralFactorFloat, priceFloat, exchangeRateFloat, balanceFloat, borrowFloat)
+
+			collateral := big.NewFloat(0).Mul(balanceFloat, multiplier)
+			totalCollateral = big.NewFloat(0).Add(totalCollateral, collateral)
+
 			loan := big.NewFloat(0).Mul(borrowFloat, priceFloat)
 			totalLoan = big.NewFloat(0).Add(totalLoan, loan)
 		}
 
 		totalLoan = big.NewFloat(0).Add(totalLoan, mintVAISFloat)
-		fmt.Printf("totalCollateral:%v, totalLoan:%v\n", totalCollateral, totalLoan)
+		fmt.Printf("totalCollateral:%v, totalLoan:%v\n", totalCollateral.String(), totalLoan)
 		healthFactor := big.NewFloat(0).Quo(totalCollateral, totalLoan)
 		fmt.Printf("healthFactor：%v\n", healthFactor)
 
@@ -335,7 +342,7 @@ func TestCalculateHealthFactor1(t *testing.T) {
 			calculatedLiquidity = big.NewFloat(0).Sub(totalCollateral, totalLoan)
 		}
 
-		fmt.Printf("liquidity:%v, calculatedLiquidity:%v\n", liquidity, calculatedLiquidity)
+		fmt.Printf("liquidity:%v, calculatedLiquidity:%v\n", liquidity.String(), calculatedLiquidity.String())
 		fmt.Printf("shortfall:%v, calculatedShortfall:%v\n", shortfall, calculatedShortfall)
 	}
 }
@@ -353,13 +360,205 @@ func TestSyncMarketsAndPrices(t *testing.T) {
 	sync := NewSyncer(c, db, cfg)
 
 	sync.doSyncMarketsAndPrices()
+	require.Equal(t, common.HexToAddress("0xf508fCD89b8bd15579dc79A6827cB4686A3592c8"), TokenDetail["vETH"].Address)
+}
 
-	for symbol, detail := range TokenDetail {
-		t.Logf("symbol:%v, detail:%v\n", symbol, detail)
+func TestStoreAndDeleteAccount(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	sync := NewSyncer(c, db, cfg)
+
+	healthFactor, _ := big.NewFloat(0).SetString("0.9")
+	vusdtBalance, _ := big.NewFloat(0).SetString("1000000000.0")
+	vusdtLoan, _ := big.NewFloat(0).SetString("0")
+
+	vbtcBalance, _ := big.NewFloat(0).SetString("2.5")
+	vbtctLoan, _ := big.NewFloat(0).SetString("0.2")
+
+	vbusdBalance, _ := big.NewFloat(0).SetString("0")
+	vbusdtLoan, _ := big.NewFloat(0).SetString("500.23")
+
+	assets := []Asset{
+		{
+			Symbol:  "vUSDT",
+			Balance: vusdtBalance,
+			Loan:    vusdtLoan,
+		},
+		{
+			Symbol:  "vBTC",
+			Balance: vbtcBalance,
+			Loan:    vbtctLoan,
+		},
+		{
+			Symbol:  "vBUSD",
+			Balance: vbusdBalance,
+			Loan:    vbusdtLoan,
+		},
+	}
+	info := AccountInfo{
+		HealthFactor: healthFactor,
+		Assets:       assets,
 	}
 
-	for address, symbol := range AddressToSymbol {
-		t.Logf("address:%v, symbol:%v", address, symbol)
+	account := common.HexToAddress("0x332E2Dcd239Bb40d4eb31bcaE213F9F06017a4F3")
+	sync.storeAccount(account, info)
+
+	bz, err := db.Get(dbm.AccountStoreKey(account.Bytes()), nil)
+	//t.Logf("bz:%v\n", string(bz))
+	require.NoError(t, err)
+
+	var got AccountInfo
+	err = json.Unmarshal(bz, &got)
+	require.NoError(t, err)
+
+	has, err := db.Has(dbm.LiquidationBelow1P0StoreKey(account.Bytes()), nil)
+	require.NoError(t, err)
+	require.True(t, has)
+
+	bz, err = db.Get(dbm.LiquidationBelow1P0StoreKey(account.Bytes()), nil)
+	require.NoError(t, err)
+	require.Equal(t, bz, account.Bytes())
+
+	for _, asset := range assets {
+		has, err = db.Has(dbm.MarketStoreKey([]byte(asset.Symbol), account.Bytes()), nil)
+		require.NoError(t, err)
+		require.True(t, has)
+
+		bz, err = db.Get(dbm.MarketStoreKey([]byte(asset.Symbol), account.Bytes()), nil)
+		require.NoError(t, err)
+		require.Equal(t, bz, account.Bytes())
+	}
+
+	had, err := db.Has(dbm.MarketStoreKey([]byte("vETH"), account.Bytes()), nil)
+	require.NoError(t, err)
+	require.False(t, had)
+
+	sync.deleteAccount(account)
+	has, err = db.Has(dbm.LiquidationBelow1P0StoreKey(account.Bytes()), nil)
+	require.NoError(t, err)
+	require.False(t, has)
+
+	bz, err = db.Get(dbm.LiquidationBelow1P0StoreKey(account.Bytes()), nil)
+	require.Equal(t, leveldb.ErrNotFound, err)
+}
+
+func TestStoreAndDeleteAccount1(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	sync := NewSyncer(c, db, cfg)
+
+	healthFactor, _ := big.NewFloat(0).SetString("1.1")
+	vusdtBalance, _ := big.NewFloat(0).SetString("1000000000.0")
+	vusdtLoan, _ := big.NewFloat(0).SetString("0")
+
+	vbtcBalance, _ := big.NewFloat(0).SetString("2.5")
+	vbtctLoan, _ := big.NewFloat(0).SetString("0.2")
+
+	vbusdBalance, _ := big.NewFloat(0).SetString("0")
+	vbusdtLoan, _ := big.NewFloat(0).SetString("500.23")
+
+	assets := []Asset{
+		{
+			Symbol:  "vUSDT",
+			Balance: vusdtBalance,
+			Loan:    vusdtLoan,
+		},
+		{
+			Symbol:  "vBTC",
+			Balance: vbtcBalance,
+			Loan:    vbtctLoan,
+		},
+		{
+			Symbol:  "vBUSD",
+			Balance: vbusdBalance,
+			Loan:    vbusdtLoan,
+		},
+	}
+	info := AccountInfo{
+		HealthFactor: healthFactor,
+		Assets:       assets,
+	}
+
+	account := common.HexToAddress("0x332E2Dcd239Bb40d4eb31bcaE213F9F06017a4F3")
+	sync.storeAccount(account, info)
+
+	bz, err := db.Get(dbm.AccountStoreKey(account.Bytes()), nil)
+	t.Logf("bz:%v\n", string(bz))
+	require.NoError(t, err)
+
+	var got AccountInfo
+	err = json.Unmarshal(bz, &got)
+	require.NoError(t, err)
+
+	has, err := db.Has(dbm.LiquidationBelow1P2StoreKey(account.Bytes()), nil)
+	require.NoError(t, err)
+	require.True(t, has)
+
+	bz, err = db.Get(dbm.LiquidationBelow1P2StoreKey(account.Bytes()), nil)
+	require.NoError(t, err)
+	require.Equal(t, bz, account.Bytes())
+
+	for _, asset := range assets {
+		has, err = db.Has(dbm.MarketStoreKey([]byte(asset.Symbol), account.Bytes()), nil)
+		require.NoError(t, err)
+		require.True(t, has)
+
+		bz, err = db.Get(dbm.MarketStoreKey([]byte(asset.Symbol), account.Bytes()), nil)
+		require.NoError(t, err)
+		require.Equal(t, bz, account.Bytes())
+	}
+
+	had, err := db.Has(dbm.MarketStoreKey([]byte("vETH"), account.Bytes()), nil)
+	require.NoError(t, err)
+	require.False(t, had)
+
+	sync.deleteAccount(account)
+
+	vsxpBalance, _ := big.NewFloat(0).SetString("236.5")
+	vsxpLoan, _ := big.NewFloat(0).SetString("800.23")
+
+	assets = append(assets, Asset{
+		Symbol:  "vSXP",
+		Balance: vsxpBalance,
+		Loan:    vsxpLoan,
+	})
+
+	info = AccountInfo{
+		HealthFactor: healthFactor,
+		Assets:       assets,
+	}
+
+	sync.storeAccount(account, info)
+	bz, err = db.Get(dbm.AccountStoreKey(account.Bytes()), nil)
+	//t.Logf("bz:%v\n", string(bz))
+	require.NoError(t, err)
+
+	err = json.Unmarshal(bz, &got)
+	require.NoError(t, err)
+
+	for _, asset := range assets {
+		//fmt.Printf("symbol:%v\n", asset.Symbol)
+		has, err = db.Has(dbm.MarketStoreKey([]byte(asset.Symbol), account.Bytes()), nil)
+		require.NoError(t, err)
+		require.True(t, has)
+
+		bz, err = db.Get(dbm.MarketStoreKey([]byte(asset.Symbol), account.Bytes()), nil)
+		require.NoError(t, err)
+		require.Equal(t, bz, account.Bytes())
 	}
 }
 
