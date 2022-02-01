@@ -8,15 +8,15 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/readygo67/LiquidationBot/venus"
-	"github.com/syndtr/goleveldb/leveldb/util"
-	"strings"
-
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/readygo67/LiquidationBot/db"
+	"github.com/readygo67/LiquidationBot/venus"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/util"
 	"math/big"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,7 +24,7 @@ import (
 const (
 	ConfirmHeight        = 0
 	ScanSpan             = 10000
-	SyncIntervalBelow1P0 = 3
+	SyncIntervalBelow1P0 = 3 //in secs
 	SyncIntervalBelow1P2 = 9
 	SyncIntervalBelow1P5 = 27
 	SyncIntervalBelow2P0 = 81
@@ -66,14 +66,16 @@ type Liquidation struct {
 	BlockNumber  uint64
 }
 
+type semaphore chan struct{}
+
 var (
-	ExpScaleFloat, _    = big.NewFloat(0).SetString("1000000000000000000")
-	VTokenScaleFloat, _ = big.NewFloat(0).SetString("100000000")
-	BigFloat1P0, _      = big.NewFloat(0).SetString("1.0")
-	BigFloat1P2, _      = big.NewFloat(0).SetString("1.2")
-	BigFloat1P5, _      = big.NewFloat(0).SetString("1.5")
-	BigFloat2P0, _      = big.NewFloat(0).SetString("2.0")
-	BigFloat3P0, _      = big.NewFloat(0).SetString("3.0")
+	ExpScaleFloat, _ = big.NewFloat(0).SetString("1000000000000000000")
+	BigFloatZero, _  = big.NewFloat(0).SetString("0")
+	BigFloat1P0, _   = big.NewFloat(0).SetString("1.0")
+	BigFloat1P2, _   = big.NewFloat(0).SetString("1.2")
+	BigFloat1P5, _   = big.NewFloat(0).SetString("1.5")
+	BigFloat2P0, _   = big.NewFloat(0).SetString("2.0")
+	BigFloat3P0, _   = big.NewFloat(0).SetString("3.0")
 )
 
 type Syncer struct {
@@ -94,7 +96,20 @@ type Syncer struct {
 	LiquidationCh       chan *Liquidation
 }
 
+func (s semaphore) Acquire() {
+	s <- struct{}{}
+}
+
+func (s semaphore) Release() {
+	<-s
+}
+
 func NewSyncer(c *ethclient.Client, db *leveldb.DB, comptrollerAddress string, oracleAddress string) *Syncer {
+	exist, err := db.Has(dbm.BorrowerNumberKey(), nil)
+	if !exist {
+		db.Put(dbm.BorrowerNumberKey(), big.NewInt(0).Bytes(), nil)
+	}
+
 	comptroller, err := venus.NewComptroller(common.HexToAddress(comptrollerAddress), c)
 	if err != nil {
 		panic(err)
@@ -114,42 +129,56 @@ func NewSyncer(c *ethclient.Client, db *leveldb.DB, comptrollerAddress string, o
 	tokens := make(map[string]TokenInfo)
 	vbep20s := make(map[common.Address]*venus.Vbep20)
 
-	for _, market := range markets {
-		vbep20, err := venus.NewVbep20(market, c)
-		if err != nil {
-			panic(err)
-		}
-		symbol, err := vbep20.Symbol(nil)
-		if err != nil {
-			panic(err)
-		}
+	var wg sync.WaitGroup
+	var m sync.Mutex
+	wg.Add(len(markets))
 
-		marketDetail, err := comptroller.Markets(nil, market)
-		if err != nil {
-			panic(err)
-		}
+	sem := make(semaphore, runtime.NumCPU())
+	for _, market_ := range markets {
+		market := market_
+		sem.Acquire()
+		go func() {
+			defer sem.Release()
+			defer wg.Done()
+			vbep20, err := venus.NewVbep20(market, c)
+			if err != nil {
+				panic(err)
+			}
+			symbol, err := vbep20.Symbol(nil)
+			if err != nil {
+				panic(err)
+			}
 
-		price, err := oracle.GetUnderlyingPrice(nil, market)
-		if err != nil {
-			panic(err)
-		}
+			marketDetail, err := comptroller.Markets(nil, market)
+			if err != nil {
+				panic(err)
+			}
 
-		collateralFactorFloatExp := big.NewFloat(0).SetInt(marketDetail.CollateralFactorMantissa)
-		collateralFactorFloat := big.NewFloat(0).Quo(collateralFactorFloatExp, ExpScaleFloat)
+			price, err := oracle.GetUnderlyingPrice(nil, market)
+			if err != nil {
+				price = big.NewInt(0)
+			}
 
-		priceFloatExp := big.NewFloat(0).SetInt(price)
-		priceFloat := big.NewFloat(0).Quo(priceFloatExp, ExpScaleFloat)
+			collateralFactorFloatExp := big.NewFloat(0).SetInt(marketDetail.CollateralFactorMantissa)
+			collateralFactorFloat := big.NewFloat(0).Quo(collateralFactorFloatExp, ExpScaleFloat)
+			priceFloatExp := big.NewFloat(0).SetInt(price)
+			priceFloat := big.NewFloat(0).Quo(priceFloatExp, ExpScaleFloat)
 
-		token := TokenInfo{
-			Address:               market,
-			CollateralFactorFloat: collateralFactorFloat,
-			PriceFloat:            priceFloat,
-		}
+			token := TokenInfo{
+				Address:               market,
+				CollateralFactorFloat: collateralFactorFloat,
+				PriceFloat:            priceFloat,
+			}
 
-		tokens[symbol] = token
-		symbols[market] = symbol
-		vbep20s[market] = vbep20
+			m.Lock()
+			//fmt.Printf("market:%v, symbol:%v, token:%+v\n", market, symbol, token)
+			tokens[symbol] = token
+			symbols[market] = symbol
+			vbep20s[market] = vbep20
+			m.Unlock()
+		}()
 	}
+	wg.Wait()
 
 	return &Syncer{
 		c:                   c,
@@ -198,69 +227,131 @@ func (s *Syncer) syncMarketsAndPrices() {
 			return
 		case <-t.C:
 			log.Info("sync markers and prices")
-			err := s.doSyncMarketsAndPrices()
-			if err != nil {
-				t.Reset(time.Millisecond * 20)
-			} else {
-				t.Reset(time.Second * 3)
-			}
+			fmt.Println("sync markers and prices")
+			s.doSyncMarketsAndPrices()
 		case <-s.forceUpdatePricesCh:
 			s.doSyncMarketsAndPrices()
 		}
 	}
 }
 
-func (s *Syncer) doSyncMarketsAndPrices() error {
+//
+//func (s *Syncer) doSyncMarketsAndPrices() error {
+//	comptroller := s.comptroller
+//	oracle := s.oracle
+//	c := s.c
+//
+//	markets, err := comptroller.GetAllMarkets(nil)
+//	if err != nil {
+//		return err
+//	}
+//
+//	errCount := uint32(0)
+//	symbols := make(map[common.Address]string)
+//	tokens := make(map[string]TokenInfo)
+//
+//	for _, market := range markets {
+//		fmt.Printf("market:%v\n", market)
+//		vbep20, err := venus.NewVbep20(market, c)
+//		if err != nil {
+//			atomic.AddUint32(&errCount, 1)
+//		}
+//		symbol, err := vbep20.Symbol(nil)
+//		if err != nil {
+//			atomic.AddUint32(&errCount, 1)
+//		}
+//
+//		marketDetail, err := comptroller.Markets(nil, market)
+//		if err != nil {
+//			atomic.AddUint32(&errCount, 1)
+//		}
+//
+//		price, err := oracle.GetUnderlyingPrice(nil, market)
+//		if err != nil {
+//			price = big.NewInt(0)
+//			atomic.AddUint32(&errCount, 1)
+//		}
+//
+//		collateralFactorFloatExp := big.NewFloat(0).SetInt(marketDetail.CollateralFactorMantissa)
+//		collateralFactorFloat := big.NewFloat(0).Quo(collateralFactorFloatExp, ExpScaleFloat)
+//
+//		priceFloatExp := big.NewFloat(0).SetInt(price)
+//		priceFloat := big.NewFloat(0).Quo(priceFloatExp, ExpScaleFloat)
+//
+//		token := TokenInfo{
+//			Address:               market,
+//			CollateralFactorFloat: collateralFactorFloat,
+//			PriceFloat:            priceFloat,
+//		}
+//
+//		tokens[symbol] = token
+//		symbols[market] = symbol
+//	}
+//
+//	s.tokens = tokens
+//	s.symbols = symbols
+//	return nil
+//}
+
+func (s *Syncer) doSyncMarketsAndPrices() {
 	comptroller := s.comptroller
 	oracle := s.oracle
 	c := s.c
 
 	markets, err := comptroller.GetAllMarkets(nil)
 	if err != nil {
-		return err
+		return
 	}
 
-	symbols := make(map[common.Address]string)
-	tokens := make(map[string]TokenInfo)
-	for _, market := range markets {
-		vbep20, err := venus.NewVbep20(market, c)
-		if err != nil {
-			return err
-		}
-		symbol, err := vbep20.Symbol(nil)
-		if err != nil {
-			return err
-		}
+	var wg sync.WaitGroup
+	var m sync.Mutex
+	wg.Add(len(markets))
 
-		marketDetail, err := comptroller.Markets(nil, market)
-		if err != nil {
-			return err
-		}
+	sem := make(semaphore, runtime.NumCPU())
+	for _, market_ := range markets {
+		market := market_
+		sem.Acquire()
+		go func() {
+			defer sem.Release()
+			defer wg.Done()
+			vbep20, err := venus.NewVbep20(market, c)
+			if err != nil {
+				return
+			}
+			symbol, err := vbep20.Symbol(nil)
+			if err != nil {
+				return
+			}
 
-		price, err := oracle.GetUnderlyingPrice(nil, market)
-		if err != nil {
-			return err
-		}
+			marketDetail, err := comptroller.Markets(nil, market)
+			if err != nil {
+				return
+			}
 
-		collateralFactorFloatExp := big.NewFloat(0).SetInt(marketDetail.CollateralFactorMantissa)
-		collateralFactorFloat := big.NewFloat(0).Quo(collateralFactorFloatExp, ExpScaleFloat)
+			price, err := oracle.GetUnderlyingPrice(nil, market)
+			if err != nil {
+				price = big.NewInt(0)
+			}
 
-		priceFloatExp := big.NewFloat(0).SetInt(price)
-		priceFloat := big.NewFloat(0).Quo(priceFloatExp, ExpScaleFloat)
+			collateralFactorFloatExp := big.NewFloat(0).SetInt(marketDetail.CollateralFactorMantissa)
+			collateralFactorFloat := big.NewFloat(0).Quo(collateralFactorFloatExp, ExpScaleFloat)
+			priceFloatExp := big.NewFloat(0).SetInt(price)
+			priceFloat := big.NewFloat(0).Quo(priceFloatExp, ExpScaleFloat)
 
-		token := TokenInfo{
-			Address:               market,
-			CollateralFactorFloat: collateralFactorFloat,
-			PriceFloat:            priceFloat,
-		}
+			token := TokenInfo{
+				Address:               market,
+				CollateralFactorFloat: collateralFactorFloat,
+				PriceFloat:            priceFloat,
+			}
 
-		tokens[symbol] = token
-		symbols[market] = symbol
+			m.Lock()
+			fmt.Printf("symbol:%v, market:%v, token:%v\n", symbol, market, token)
+			s.tokens[symbol] = token
+			s.symbols[market] = symbol
+			m.Unlock()
+		}()
 	}
-
-	s.tokens = tokens
-	s.symbols = symbols
-	return nil
+	wg.Wait()
 }
 
 func (s *Syncer) feedPrices() {
@@ -280,28 +371,45 @@ func (s *Syncer) doFeededPrices(feededPrices *FeededPrices) {
 	var accounts []common.Address
 	exist := make(map[common.Address]bool)
 
+	var wg sync.WaitGroup
+	var m sync.Mutex
+	wg.Add(len(feededPrices.Prices))
+
+	sem := make(semaphore, runtime.NumCPU())
 	for _, feededPrice := range feededPrices.Prices {
+		sem.Acquire()
 		symbol := s.symbols[feededPrice.Address]
 		prefix := append(dbm.MarketPrefix, []byte(symbol)...)
 
-		iter := db.NewIterator(util.BytesPrefix(prefix), nil)
-		for iter.Next() {
-			account := common.BytesToAddress(iter.Value())
-			if exist[account] {
-				continue
+		go func() {
+			sem.Release()
+			wg.Done()
+			iter := db.NewIterator(util.BytesPrefix(prefix), nil)
+			for iter.Next() {
+				account := common.BytesToAddress(iter.Value())
+				if exist[account] {
+					continue
+				}
+				m.Lock()
+				exist[account] = true
+				accounts = append(accounts, account)
+				m.Unlock()
 			}
-			exist[account] = true
-			accounts = append(accounts, account)
-		}
-		iter.Release()
+			iter.Release()
+		}()
 	}
+	wg.Wait()
 
+	wg.Add(len(accounts))
 	for _, account := range accounts {
-		liquidation, _ := s.syncOneAccountWithFeededPrices(account, feededPrices)
-		if liquidation != nil {
-			s.LiquidationCh <- liquidation
-		}
+		sem.Acquire()
+		go func() {
+			sem.Release()
+			wg.Done()
+			s.syncOneAccountWithFeededPrices(account, feededPrices)
+		}()
 	}
+	wg.Wait()
 }
 
 func (s *Syncer) syncAllBorrowers() {
@@ -373,12 +481,9 @@ func (s *Syncer) syncAllBorrowers() {
 				fmt.Printf("%v height:%v, name:%v borrower:%v\n", (i + 1), log.BlockNumber, symbols[log.Address], borrowEvent.Borrower)
 
 				account := borrowEvent.Borrower
-				liquidation, err := s.syncOneAccountWithIncreaseAccountNumber(account)
+				err := s.syncOneAccountWithIncreaseAccountNumber(account)
 				if err != nil {
 					goto EndWithoutUpdateHeight
-				}
-				if liquidation != nil {
-					s.LiquidationCh <- liquidation
 				}
 			}
 
@@ -538,15 +643,21 @@ func (s *Syncer) syncLiquidationAbove3P0() {
 }
 
 func (s *Syncer) syncAccounts(accounts []common.Address) {
+	var wg sync.WaitGroup
+	wg.Add(len(accounts))
+	sem := make(semaphore, runtime.NumCPU())
 	for _, account := range accounts {
-		liquidation, _ := s.syncOneAccount(account)
-		if liquidation != nil {
-			s.LiquidationCh <- liquidation
-		}
+		sem.Acquire()
+		go func() {
+			defer sem.Release()
+			defer wg.Done()
+			s.syncOneAccount(account)
+		}()
 	}
+	wg.Wait()
 }
 
-func (s *Syncer) syncOneAccount(account common.Address) (*Liquidation, error) {
+func (s *Syncer) syncOneAccount(account common.Address) error {
 	ctx := context.Background()
 	comptroller := s.comptroller
 	symbols := s.symbols
@@ -559,20 +670,24 @@ func (s *Syncer) syncOneAccount(account common.Address) (*Liquidation, error) {
 	var assets []Asset
 	mintVAIS, err := comptroller.MintedVAIs(nil, account)
 	if err != nil {
-		return nil, err
+		fmt.Printf("syncOneAccount, fail to get MintedVAIs, err:%v\n", err)
+		return err
 	}
 
 	mintVAISFloatExp := big.NewFloat(0).SetInt(mintVAIS)
 	mintVAISFloat := big.NewFloat(0).Quo(mintVAISFloatExp, ExpScaleFloat)
 	markets, err := comptroller.GetAssetsIn(nil, account)
 	if err != nil {
-		return nil, err
+		fmt.Printf("syncOneAccount, fail to get GetAssetsIn, err:%v\n", err)
+		return err
 	}
 
 	for _, market := range markets {
+		fmt.Printf("market:%v\n", market)
 		_, balance, borrow, exchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
 		if err != nil {
-			return nil, err
+			fmt.Printf("syncOneAccount, fail to get GetAccountSnapshot, err:%v\n", err)
+			return err
 		}
 
 		exchangeRateFloatExp := big.NewFloat(0).SetInt(exchangeRate)
@@ -604,31 +719,30 @@ func (s *Syncer) syncOneAccount(account common.Address) (*Liquidation, error) {
 	}
 
 	totalLoan = big.NewFloat(0).Add(totalLoan, mintVAISFloat)
-	fmt.Printf("totalCollateral:%v, totalLoan:%v\n", totalCollateral, totalLoan)
-	healthFactor := big.NewFloat(0).Quo(totalCollateral, totalLoan)
-	fmt.Printf("healthFactor：%v\n", healthFactor)
-
+	healthFactor := big.NewFloat(100)
+	if totalLoan.Cmp(BigFloatZero) == 1 {
+		healthFactor = big.NewFloat(0).Quo(totalCollateral, totalLoan)
+	}
+	fmt.Printf("healthFactor:%v, totalCollateral:%v, totalLoan:%v\n", healthFactor, totalCollateral, totalLoan)
 	//update market table and account table
 	info := AccountInfo{
 		HealthFactor: healthFactor,
 		Assets:       assets,
 	}
 	s.updateDB(account, info)
-
-	if healthFactor.Cmp(big.NewFloat(1)) == 1 {
-		return nil, nil
-	} else {
+	if healthFactor.Cmp(big.NewFloat(1)) != 1 {
 		blockNumber, _ := s.c.BlockNumber(ctx)
-		liquidation := Liquidation{
+		liquidation := &Liquidation{
 			Address:      account,
 			HealthFactor: healthFactor,
 			BlockNumber:  blockNumber,
 		}
-		return &liquidation, nil
+		s.LiquidationCh <- liquidation
 	}
+	return nil
 }
 
-func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feedPrices *FeededPrices) (*Liquidation, error) {
+func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPrices *FeededPrices) error {
 	ctx := context.Background()
 	comptroller := s.comptroller
 	symbols := s.symbols
@@ -638,23 +752,22 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feedPric
 	totalCollateral := big.NewFloat(0)
 	totalLoan := big.NewFloat(0)
 
-	var assets []Asset
 	mintVAIS, err := comptroller.MintedVAIs(nil, account)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	mintVAISFloatExp := big.NewFloat(0).SetInt(mintVAIS)
 	mintVAISFloat := big.NewFloat(0).Quo(mintVAISFloatExp, ExpScaleFloat)
 	markets, err := comptroller.GetAssetsIn(nil, account)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	for _, market := range markets {
 		_, balance, borrow, exchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		exchangeRateFloatExp := big.NewFloat(0).SetInt(exchangeRate)
@@ -663,7 +776,8 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feedPric
 		symbol := symbols[market]
 		collateralFactorFloat := tokens[symbol].CollateralFactorFloat
 		priceFloat := tokens[symbol].PriceFloat
-		for _, feededPrice := range feedPrices.Prices {
+		//use feeded prices
+		for _, feededPrice := range feededPrices.Prices {
 			if tokens[symbol].Address == feededPrice.Address {
 				priceFloat = feededPrice.PriceFloat
 			}
@@ -681,34 +795,28 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feedPric
 		borrowFloat := big.NewFloat(0).Quo(borrowFloatExp, ExpScaleFloat)
 		loan := big.NewFloat(0).Mul(borrowFloat, priceFloat)
 		totalLoan = big.NewFloat(0).Add(totalLoan, loan)
-
-		//build account table
-		assets = append(assets, Asset{
-			Symbol:  symbol,
-			Balance: balanceFloat,
-			Loan:    borrowFloat,
-		})
 	}
 
 	totalLoan = big.NewFloat(0).Add(totalLoan, mintVAISFloat)
-	fmt.Printf("totalCollateral:%v, totalLoan:%v\n", totalCollateral, totalLoan)
-	healthFactor := big.NewFloat(0).Quo(totalCollateral, totalLoan)
-	fmt.Printf("healthFactor：%v\n", healthFactor)
+	healthFactor := big.NewFloat(100)
+	if totalLoan.Cmp(BigFloatZero) == 1 {
+		healthFactor = big.NewFloat(0).Quo(totalCollateral, totalLoan)
+	}
+	fmt.Printf("healthFactor:%v, totalCollateral:%v, totalLoan:%v \n", healthFactor, totalCollateral, totalLoan)
 
-	if healthFactor.Cmp(big.NewFloat(1)) == 1 {
-		return nil, nil
-	} else {
+	if healthFactor.Cmp(big.NewFloat(1)) != 1 {
 		blockNumber, _ := s.c.BlockNumber(ctx)
-		liquidation := Liquidation{
+		liquidation := &Liquidation{
 			Address:      account,
 			HealthFactor: healthFactor,
 			BlockNumber:  blockNumber,
 		}
-		return &liquidation, nil
+		s.LiquidationCh <- liquidation
 	}
+	return nil
 }
 
-func (s *Syncer) syncOneAccountWithIncreaseAccountNumber(account common.Address) (*Liquidation, error) {
+func (s *Syncer) syncOneAccountWithIncreaseAccountNumber(account common.Address) error {
 	ctx := context.Background()
 	c := s.c
 	db := s.db
@@ -716,40 +824,40 @@ func (s *Syncer) syncOneAccountWithIncreaseAccountNumber(account common.Address)
 	accountBytes := account.Bytes()
 	exist, err := db.Has(dbm.BorrowersStoreKey(accountBytes), nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	byteCode, err := c.CodeAt(ctx, account, nil)
 	if len(byteCode) > 0 {
 		//ignore smart contract
-		return nil, nil
+		return nil
 	}
 
-	liquidation, err := s.syncOneAccount(account)
+	err = s.syncOneAccount(account)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if !exist {
 		//if account not exist in borrowers table, record it into borrowers table and increase borrowers number
 		err = db.Put(dbm.BorrowersStoreKey(accountBytes), accountBytes, nil)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		bz, err := db.Get(dbm.BorrowerNumberKey(), nil)
 		num := big.NewInt(0).SetBytes(bz).Int64()
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		num += 1
 		err = db.Put(dbm.BorrowerNumberKey(), big.NewInt(num).Bytes(), nil)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
-	return liquidation, nil
+	return nil
 }
 
 func (s *Syncer) updateDB(account common.Address, info AccountInfo) {
@@ -790,6 +898,7 @@ func (s *Syncer) deleteAccount(account common.Address) {
 		} else {
 			db.Delete(dbm.LiquidationAbove3P0StoreKey(accountBytes), nil)
 		}
+
 		db.Delete(dbm.AccountStoreKey(accountBytes), nil)
 	}
 }
@@ -818,4 +927,5 @@ func (s *Syncer) storeAccount(account common.Address, info AccountInfo) {
 	}
 	bz, _ := json.Marshal(info)
 	db.Put(dbm.AccountStoreKey(accountBytes), bz, nil)
+	db.Put(dbm.BorrowersStoreKey(accountBytes), accountBytes, nil)
 }
