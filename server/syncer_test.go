@@ -1,4 +1,4 @@
-package syncer
+package server
 
 import (
 	"context"
@@ -39,6 +39,7 @@ var syncer *Syncer
 //	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle)
 //
 //}
+
 func TestGetvAAVEUnderlyingPrice(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
@@ -63,7 +64,11 @@ func TestNewSyncer(t *testing.T) {
 	defer db.Close()
 	defer os.RemoveAll("testdb1")
 
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle)
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
 	verifyTokens(t, sync)
 
 	bz, err := db.Get(dbm.BorrowerNumberKey(), nil)
@@ -83,7 +88,11 @@ func TestDoSyncMarketsAndPrices(t *testing.T) {
 	defer db.Close()
 	defer os.RemoveAll("testdb1")
 
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle)
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
 	t.Logf("begin do sync markets and prices\n")
 
 	sync.doSyncMarketsAndPrices()
@@ -100,7 +109,11 @@ func TestSyncMarketsAndPrices(t *testing.T) {
 	defer db.Close()
 	defer os.RemoveAll("testdb1")
 
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle)
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
 	t.Logf("begin sync markets and prices\n")
 	sync.wg.Add(1)
 	go sync.syncMarketsAndPrices()
@@ -120,7 +133,11 @@ func TestFilterAllCotractsBorrowEvent(t *testing.T) {
 	_, err = c.BlockNumber(ctx)
 	require.NoError(t, err)
 
-	sync := NewSyncer(c, nil, cfg.Comptroller, cfg.Oracle)
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, nil, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
 
 	topicBorrow := common.HexToHash("0x13ed6866d4e1ee6da46f845c46d7e54120883d75c5ea9a2dacc1c4ca8984ab80")
 	var addresses []common.Address
@@ -156,7 +173,16 @@ func TestCalculateHealthFactorInFloat(t *testing.T) {
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
 
-	sync := NewSyncer(c, nil, cfg.Comptroller, cfg.Oracle)
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
 	comptroller := sync.comptroller
 	oracle := sync.oracle
 
@@ -258,7 +284,11 @@ func TestStoreAndDeleteAccount(t *testing.T) {
 	defer db.Close()
 	defer os.RemoveAll("testdb1")
 
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle)
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
 
 	healthFactor, _ := big.NewFloat(0).SetString("0.9")
 	vusdtBalance, _ := big.NewFloat(0).SetString("1000000000.0")
@@ -353,7 +383,11 @@ func TestStoreAndDeleteAccount1(t *testing.T) {
 	defer db.Close()
 	defer os.RemoveAll("testdb1")
 
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle)
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
 
 	healthFactor, _ := big.NewFloat(0).SetString("1.1")
 	vusdtBalance, _ := big.NewFloat(0).SetString("1000000000.0")
@@ -481,6 +515,7 @@ func TestCalculateExchangeRate(t *testing.T) {
 
 func TestSyncOneAccount(t *testing.T) {
 	cfg, err := config.New("../config.yml")
+	require.NoError(t, err)
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
 
@@ -489,7 +524,11 @@ func TestSyncOneAccount(t *testing.T) {
 	defer db.Close()
 	defer os.RemoveAll("testdb1")
 
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle)
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
 	account := common.HexToAddress("0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B")
 	accountBytes := account.Bytes()
 	err = sync.syncOneAccount(account)
@@ -555,7 +594,11 @@ func TestSyncAccounts(t *testing.T) {
 	defer db.Close()
 	defer os.RemoveAll("testdb1")
 
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle)
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
 	accountStrs := []string{
 		"0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B",
 		"0x332E2Dcd239Bb40d4eb31bcaE213F9F06017a4F3",
@@ -643,7 +686,11 @@ func TestSyncOneAccountWithIncreaseAccountNumer(t *testing.T) {
 	defer db.Close()
 	defer os.RemoveAll("testdb1")
 
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle)
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
 	account := common.HexToAddress("0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B")
 	accountBytes := account.Bytes()
 	err = sync.syncOneAccountWithIncreaseAccountNumber(account)
@@ -713,7 +760,11 @@ func TestSyncOneAccountWithFeededPrices(t *testing.T) {
 	defer db.Close()
 	defer os.RemoveAll("testdb1")
 
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle)
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
 	account := common.HexToAddress("0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B")
 	accountBytes := account.Bytes()
 
@@ -834,7 +885,11 @@ func TestScanAllBorrowers1(t *testing.T) {
 	height, err := c.BlockNumber(ctx)
 	require.NoError(t, err)
 
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle)
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
 	startHeight := big.NewInt(int64(height - 5000))
 	db.Put(dbm.KeyLastHandledHeight, startHeight.Bytes(), nil)
 	db.Put(dbm.KeyBorrowerNumber, big.NewInt(0).Bytes(), nil)

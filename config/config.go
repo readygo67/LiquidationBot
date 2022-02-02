@@ -11,6 +11,8 @@ type Config struct {
 	Oracle      string `yaml:"oracle"`
 	Comptroller string `yaml:"comptroller"`
 	DB          string `yaml:"db"`
+	StartHeihgt uint64 `yaml:"start_heihgt"`
+	Override    bool   `yaml:"override"`
 }
 
 // Setup init config
