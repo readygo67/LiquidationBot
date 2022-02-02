@@ -1,4 +1,4 @@
-package syncer
+package server
 
 import (
 	"context"
@@ -64,6 +64,7 @@ type Liquidation struct {
 	Address      common.Address
 	HealthFactor *big.Float
 	BlockNumber  uint64
+	Endtime      time.Time
 }
 
 type semaphore chan struct{}
@@ -93,7 +94,9 @@ type Syncer struct {
 	quitCh              chan struct{}
 	forceUpdatePricesCh chan struct{}
 	feededPricesCh      chan *FeededPrices
-	LiquidationCh       chan *Liquidation
+
+	liquidationCh        chan *Liquidation
+	priortyLiquidationCh chan *Liquidation
 }
 
 func (s semaphore) Acquire() {
@@ -104,7 +107,15 @@ func (s semaphore) Release() {
 	<-s
 }
 
-func NewSyncer(c *ethclient.Client, db *leveldb.DB, comptrollerAddress string, oracleAddress string) *Syncer {
+func NewSyncer(
+	c *ethclient.Client,
+	db *leveldb.DB,
+	comptrollerAddress string,
+	oracleAddress string,
+	feededPricesCh chan *FeededPrices,
+	liquidationCh chan *Liquidation,
+	priorityLiquationCh chan *Liquidation) *Syncer {
+
 	exist, err := db.Has(dbm.BorrowerNumberKey(), nil)
 	if !exist {
 		db.Put(dbm.BorrowerNumberKey(), big.NewInt(0).Bytes(), nil)
@@ -181,23 +192,24 @@ func NewSyncer(c *ethclient.Client, db *leveldb.DB, comptrollerAddress string, o
 	wg.Wait()
 
 	return &Syncer{
-		c:                   c,
-		db:                  db,
-		oracle:              oracle,
-		comptroller:         comptroller,
-		tokens:              tokens,
-		symbols:             symbols,
-		vbep20s:             vbep20s,
-		quitCh:              make(chan struct{}),
-		forceUpdatePricesCh: make(chan struct{}, 10),
-		feededPricesCh:      make(chan *FeededPrices, 64),
-		LiquidationCh:       make(chan *Liquidation, 64),
+		c:                    c,
+		db:                   db,
+		oracle:               oracle,
+		comptroller:          comptroller,
+		tokens:               tokens,
+		symbols:              symbols,
+		vbep20s:              vbep20s,
+		quitCh:               make(chan struct{}),
+		forceUpdatePricesCh:  make(chan struct{}),
+		feededPricesCh:       feededPricesCh,
+		liquidationCh:        liquidationCh,
+		priortyLiquidationCh: priorityLiquationCh,
 	}
 }
 
 func (s *Syncer) Start() {
-	log.Info("syncer start")
-	fmt.Println("syncer start")
+	log.Info("server start")
+	fmt.Println("server start")
 
 	s.wg.Add(9)
 	go s.syncMarketsAndPrices()
@@ -221,77 +233,21 @@ func (s *Syncer) syncMarketsAndPrices() {
 	t := time.NewTimer(0)
 	defer t.Stop()
 
+	count := 1
 	for {
 		select {
 		case <-s.quitCh:
 			return
 		case <-t.C:
-			log.Info("sync markers and prices")
-			fmt.Println("sync markers and prices")
+			fmt.Printf("%v th sync markers and prices @ %v\n", count, time.Now())
+			count++
 			s.doSyncMarketsAndPrices()
+			t.Reset(time.Second * 3)
 		case <-s.forceUpdatePricesCh:
 			s.doSyncMarketsAndPrices()
 		}
 	}
 }
-
-//
-//func (s *Syncer) doSyncMarketsAndPrices() error {
-//	comptroller := s.comptroller
-//	oracle := s.oracle
-//	c := s.c
-//
-//	markets, err := comptroller.GetAllMarkets(nil)
-//	if err != nil {
-//		return err
-//	}
-//
-//	errCount := uint32(0)
-//	symbols := make(map[common.Address]string)
-//	tokens := make(map[string]TokenInfo)
-//
-//	for _, market := range markets {
-//		fmt.Printf("market:%v\n", market)
-//		vbep20, err := venus.NewVbep20(market, c)
-//		if err != nil {
-//			atomic.AddUint32(&errCount, 1)
-//		}
-//		symbol, err := vbep20.Symbol(nil)
-//		if err != nil {
-//			atomic.AddUint32(&errCount, 1)
-//		}
-//
-//		marketDetail, err := comptroller.Markets(nil, market)
-//		if err != nil {
-//			atomic.AddUint32(&errCount, 1)
-//		}
-//
-//		price, err := oracle.GetUnderlyingPrice(nil, market)
-//		if err != nil {
-//			price = big.NewInt(0)
-//			atomic.AddUint32(&errCount, 1)
-//		}
-//
-//		collateralFactorFloatExp := big.NewFloat(0).SetInt(marketDetail.CollateralFactorMantissa)
-//		collateralFactorFloat := big.NewFloat(0).Quo(collateralFactorFloatExp, ExpScaleFloat)
-//
-//		priceFloatExp := big.NewFloat(0).SetInt(price)
-//		priceFloat := big.NewFloat(0).Quo(priceFloatExp, ExpScaleFloat)
-//
-//		token := TokenInfo{
-//			Address:               market,
-//			CollateralFactorFloat: collateralFactorFloat,
-//			PriceFloat:            priceFloat,
-//		}
-//
-//		tokens[symbol] = token
-//		symbols[market] = symbol
-//	}
-//
-//	s.tokens = tokens
-//	s.symbols = symbols
-//	return nil
-//}
 
 func (s *Syncer) doSyncMarketsAndPrices() {
 	comptroller := s.comptroller
@@ -345,7 +301,7 @@ func (s *Syncer) doSyncMarketsAndPrices() {
 			}
 
 			m.Lock()
-			fmt.Printf("symbol:%v, market:%v, token:%v\n", symbol, market, token)
+			//fmt.Printf("symbol:%v, market:%v, token:%v\n", symbol, market, token)
 			s.tokens[symbol] = token
 			s.symbols[market] = symbol
 			m.Unlock()
@@ -478,7 +434,7 @@ func (s *Syncer) syncAllBorrowers() {
 			for i, log := range logs {
 				var borrowEvent venus.Vbep20Borrow
 				err = vbep20Abi.UnpackIntoInterface(&borrowEvent, "Borrow", log.Data)
-				fmt.Printf("%v height:%v, name:%v borrower:%v\n", (i + 1), log.BlockNumber, symbols[log.Address], borrowEvent.Borrower)
+				fmt.Printf("%v height:%v, name:%v account:%v\n", (i + 1), log.BlockNumber, symbols[log.Address], borrowEvent.Borrower)
 
 				account := borrowEvent.Borrower
 				err := s.syncOneAccountWithIncreaseAccountNumber(account)
@@ -505,11 +461,14 @@ func (s *Syncer) syncLiquidationBelow1P0() {
 	t := time.NewTimer(0)
 	defer t.Stop()
 
+	count := 1
 	for {
 		select {
 		case <-s.quitCh:
 			return
 		case <-t.C:
+			fmt.Printf("%vth sync below 1.0 start @ %v\n", count, time.Now())
+			count++
 			var accounts []common.Address
 			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P0Prefix), nil)
 			for iter.Next() {
@@ -529,11 +488,14 @@ func (s *Syncer) syncLiquidationBelow1P2() {
 	t := time.NewTimer(0)
 	defer t.Stop()
 
+	count := 1
 	for {
 		select {
 		case <-s.quitCh:
 			return
 		case <-t.C:
+			fmt.Printf("%vth sync below 1.2 start @ %v\n", count, time.Now())
+			count++
 			var accounts []common.Address
 			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P2Prefix), nil)
 			for iter.Next() {
@@ -553,11 +515,14 @@ func (s *Syncer) syncLiquidationBelow1P5() {
 	t := time.NewTimer(0)
 	defer t.Stop()
 
+	count := 1
 	for {
 		select {
 		case <-s.quitCh:
 			return
 		case <-t.C:
+			fmt.Printf("%vth sync below 1.5 start @ %v\n", count, time.Now())
+			count++
 			var accounts []common.Address
 			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P5Prefix), nil)
 			for iter.Next() {
@@ -577,11 +542,14 @@ func (s *Syncer) syncLiquidationBelow2P0() {
 	t := time.NewTimer(0)
 	defer t.Stop()
 
+	count := 1
 	for {
 		select {
 		case <-s.quitCh:
 			return
 		case <-t.C:
+			fmt.Printf("%vth sync below 2.0 start @ %v\n", count, time.Now())
+			count++
 			var accounts []common.Address
 			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow2P0Prefix), nil)
 			for iter.Next() {
@@ -601,11 +569,14 @@ func (s *Syncer) syncLiquidationBelow3P0() {
 	t := time.NewTimer(0)
 	defer t.Stop()
 
+	count := 1
 	for {
 		select {
 		case <-s.quitCh:
 			return
 		case <-t.C:
+			fmt.Printf("%vth sync below 3.0 start @ %v\n", count, time.Now())
+			count++
 			var accounts []common.Address
 			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow3P0Prefix), nil)
 			for iter.Next() {
@@ -625,11 +596,14 @@ func (s *Syncer) syncLiquidationAbove3P0() {
 	t := time.NewTimer(0)
 	defer t.Stop()
 
+	count := 1
 	for {
 		select {
 		case <-s.quitCh:
 			return
 		case <-t.C:
+			fmt.Printf("%vth sync above 3.0 start @ %v\n", count, time.Now())
+			count++
 			var accounts []common.Address
 			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationAbove3P0Prefix), nil)
 			for iter.Next() {
@@ -725,7 +699,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 	if totalLoan.Cmp(BigFloatZero) == 1 {
 		healthFactor = big.NewFloat(0).Quo(totalCollateral, totalLoan)
 	}
-	fmt.Printf("healthFactor:%v, totalCollateral:%v, totalLoan:%v\n", healthFactor, totalCollateral, totalLoan)
+	fmt.Printf("accout:%v, healthFactor:%v, totalCollateral:%v, totalLoan:%v\n", account, healthFactor, totalCollateral, totalLoan)
 	//update market table and account table
 	info := AccountInfo{
 		HealthFactor: healthFactor,
@@ -739,7 +713,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 			HealthFactor: healthFactor,
 			BlockNumber:  blockNumber,
 		}
-		s.LiquidationCh <- liquidation
+		s.liquidationCh <- liquidation
 	}
 	return nil
 }
@@ -804,7 +778,7 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 	if totalLoan.Cmp(BigFloatZero) == 1 {
 		healthFactor = big.NewFloat(0).Quo(totalCollateral, totalLoan)
 	}
-	fmt.Printf("healthFactor:%v, totalCollateral:%v, totalLoan:%v \n", healthFactor, totalCollateral, totalLoan)
+	fmt.Printf("account:%v, healthFactor:%v, totalCollateral:%v, totalLoan:%v \n", account, healthFactor, totalCollateral, totalLoan)
 
 	if healthFactor.Cmp(big.NewFloat(1)) != 1 {
 		blockNumber, _ := s.c.BlockNumber(ctx)
@@ -813,7 +787,7 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 			HealthFactor: healthFactor,
 			BlockNumber:  blockNumber,
 		}
-		s.LiquidationCh <- liquidation
+		s.priortyLiquidationCh <- liquidation
 	}
 	return nil
 }

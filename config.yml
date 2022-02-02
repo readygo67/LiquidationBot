@@ -3,3 +3,5 @@ network: mainnet
 comptroller : "0xfD36E2c2a6789Db23113685031d7F16329158384"
 oracle: "0x516c18DC440f107f12619a6d2cc320622807d0eE"
 db: testdb
+start_heihgt: 13000000
+override: false

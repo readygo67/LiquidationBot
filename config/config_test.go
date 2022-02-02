@@ -11,4 +11,6 @@ func TestConfig(t *testing.T) {
 	require.NoError(t, err)
 	fmt.Printf("db:%+v\n", config.DB)
 	fmt.Printf("comptroller:%+v\n", config.Comptroller)
+	fmt.Printf("override:%v\n", config.Override)
+	fmt.Printf("StartHeight:%v\n", config.StartHeihgt)
 }
