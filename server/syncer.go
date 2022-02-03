@@ -23,13 +23,12 @@ import (
 
 const (
 	ConfirmHeight        = 0
-	ScanSpan             = 10000
+	ScanSpan             = 1000
 	SyncIntervalBelow1P0 = 3 //in secs
-	SyncIntervalBelow1P2 = 9
-	SyncIntervalBelow1P5 = 27
-	SyncIntervalBelow2P0 = 81
-	SyncIntervalBelow3P0 = 243
-	SyncIntervalAbove3P0 = 729
+	SyncIntervalBelow1P1 = 6
+	SyncIntervalBelow1P5 = 30
+	SyncIntervalBelow2P0 = 150
+	SyncIntervalAbove2P0 = 300
 )
 
 type TokenInfo struct {
@@ -73,7 +72,7 @@ var (
 	ExpScaleFloat, _ = big.NewFloat(0).SetString("1000000000000000000")
 	BigFloatZero, _  = big.NewFloat(0).SetString("0")
 	BigFloat1P0, _   = big.NewFloat(0).SetString("1.0")
-	BigFloat1P2, _   = big.NewFloat(0).SetString("1.2")
+	BigFloat1P1, _   = big.NewFloat(0).SetString("1.1")
 	BigFloat1P5, _   = big.NewFloat(0).SetString("1.5")
 	BigFloat2P0, _   = big.NewFloat(0).SetString("2.0")
 	BigFloat3P0, _   = big.NewFloat(0).SetString("3.0")
@@ -83,13 +82,13 @@ type Syncer struct {
 	c  *ethclient.Client
 	db *leveldb.DB
 
-	oracle      *venus.Oracle
-	comptroller *venus.Comptroller
-	symbols     map[common.Address]string
-	tokens      map[string]TokenInfo
-	vbep20s     map[common.Address]*venus.Vbep20
-
+	oracle              *venus.Oracle
+	comptroller         *venus.Comptroller
+	symbols             map[common.Address]string
+	tokens              map[string]TokenInfo
+	vbep20s             map[common.Address]*venus.Vbep20
 	syncDone            bool
+	m                   sync.Mutex
 	wg                  sync.WaitGroup
 	quitCh              chan struct{}
 	forceUpdatePricesCh chan struct{}
@@ -199,6 +198,7 @@ func NewSyncer(
 		tokens:               tokens,
 		symbols:              symbols,
 		vbep20s:              vbep20s,
+		m:                    m,
 		quitCh:               make(chan struct{}),
 		forceUpdatePricesCh:  make(chan struct{}),
 		feededPricesCh:       feededPricesCh,
@@ -211,16 +211,15 @@ func (s *Syncer) Start() {
 	log.Info("server start")
 	fmt.Println("server start")
 
-	s.wg.Add(9)
+	s.wg.Add(8)
 	go s.syncMarketsAndPrices()
 	go s.feedPrices()
 	go s.syncAllBorrowers()
 	go s.syncLiquidationBelow1P0()
-	go s.syncLiquidationBelow1P2()
+	go s.syncLiquidationBelow1P1()
 	go s.syncLiquidationBelow1P5()
 	go s.syncLiquidationBelow2P0()
-	go s.syncLiquidationBelow3P0()
-	go s.syncLiquidationAbove3P0()
+	go s.syncLiquidationAbove2P0()
 }
 
 func (s *Syncer) Stop() {
@@ -260,7 +259,6 @@ func (s *Syncer) doSyncMarketsAndPrices() {
 	}
 
 	var wg sync.WaitGroup
-	var m sync.Mutex
 	wg.Add(len(markets))
 
 	sem := make(semaphore, runtime.NumCPU())
@@ -300,11 +298,11 @@ func (s *Syncer) doSyncMarketsAndPrices() {
 				PriceFloat:            priceFloat,
 			}
 
-			m.Lock()
+			s.m.Lock()
 			//fmt.Printf("symbol:%v, market:%v, token:%v\n", symbol, market, token)
 			s.tokens[symbol] = token
 			s.symbols[market] = symbol
-			m.Unlock()
+			s.m.Unlock()
 		}()
 	}
 	wg.Wait()
@@ -372,9 +370,11 @@ func (s *Syncer) syncAllBorrowers() {
 	defer s.wg.Done()
 	db := s.db
 	c := s.c
-	tokens := s.tokens
-	symbols := s.symbols
 	ctx := context.Background()
+	s.m.Lock()
+	symbols := copySymbols(s.symbols)
+	tokens := copyTokens(s.tokens)
+	s.m.Unlock()
 
 	topicBorrow := common.HexToHash("0x13ed6866d4e1ee6da46f845c46d7e54120883d75c5ea9a2dacc1c4ca8984ab80")
 	vbep20Abi, _ := abi.JSON(strings.NewReader(venus.Vbep20MetaData.ABI))
@@ -428,6 +428,7 @@ func (s *Syncer) syncAllBorrowers() {
 
 			logs, err = c.FilterLogs(context.Background(), query)
 			if err != nil {
+				fmt.Printf("syncAllBorrowers, fail to filter logs, err:%v\n", err)
 				goto EndWithoutUpdateHeight
 			}
 
@@ -469,19 +470,21 @@ func (s *Syncer) syncLiquidationBelow1P0() {
 		case <-t.C:
 			fmt.Printf("%vth sync below 1.0 start @ %v\n", count, time.Now())
 			count++
+
 			var accounts []common.Address
 			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P0Prefix), nil)
 			for iter.Next() {
 				accounts = append(accounts, common.BytesToAddress(iter.Value()))
 			}
-			s.syncAccounts(accounts)
 			iter.Release()
+
+			s.syncAccounts(accounts)
 			t.Reset(time.Second * SyncIntervalBelow1P0)
 		}
 	}
 }
 
-func (s *Syncer) syncLiquidationBelow1P2() {
+func (s *Syncer) syncLiquidationBelow1P1() {
 	defer s.wg.Done()
 	db := s.db
 
@@ -494,16 +497,18 @@ func (s *Syncer) syncLiquidationBelow1P2() {
 		case <-s.quitCh:
 			return
 		case <-t.C:
-			fmt.Printf("%vth sync below 1.2 start @ %v\n", count, time.Now())
+			fmt.Printf("%vth sync below 1.1 start @ %v\n", count, time.Now())
 			count++
+
 			var accounts []common.Address
-			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P2Prefix), nil)
+			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P1Prefix), nil)
 			for iter.Next() {
 				accounts = append(accounts, common.BytesToAddress(iter.Value()))
 			}
-			s.syncAccounts(accounts)
 			iter.Release()
-			t.Reset(time.Second * SyncIntervalBelow1P2)
+
+			s.syncAccounts(accounts)
+			t.Reset(time.Second * SyncIntervalBelow1P1)
 		}
 	}
 }
@@ -523,13 +528,15 @@ func (s *Syncer) syncLiquidationBelow1P5() {
 		case <-t.C:
 			fmt.Printf("%vth sync below 1.5 start @ %v\n", count, time.Now())
 			count++
+
 			var accounts []common.Address
 			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P5Prefix), nil)
 			for iter.Next() {
 				accounts = append(accounts, common.BytesToAddress(iter.Value()))
 			}
-			s.syncAccounts(accounts)
 			iter.Release()
+
+			s.syncAccounts(accounts)
 			t.Reset(time.Second * SyncIntervalBelow1P5)
 		}
 	}
@@ -550,19 +557,21 @@ func (s *Syncer) syncLiquidationBelow2P0() {
 		case <-t.C:
 			fmt.Printf("%vth sync below 2.0 start @ %v\n", count, time.Now())
 			count++
+
 			var accounts []common.Address
 			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow2P0Prefix), nil)
 			for iter.Next() {
 				accounts = append(accounts, common.BytesToAddress(iter.Value()))
 			}
-			s.syncAccounts(accounts)
 			iter.Release()
+
+			s.syncAccounts(accounts)
 			t.Reset(time.Second * SyncIntervalBelow2P0)
 		}
 	}
 }
 
-func (s *Syncer) syncLiquidationBelow3P0() {
+func (s *Syncer) syncLiquidationAbove2P0() {
 	defer s.wg.Done()
 	db := s.db
 
@@ -575,43 +584,18 @@ func (s *Syncer) syncLiquidationBelow3P0() {
 		case <-s.quitCh:
 			return
 		case <-t.C:
-			fmt.Printf("%vth sync below 3.0 start @ %v\n", count, time.Now())
+			fmt.Printf("%vth sync above 2.0 start @ %v\n", count, time.Now())
 			count++
+
 			var accounts []common.Address
-			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow3P0Prefix), nil)
+			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationAbove2P0Prefix), nil)
 			for iter.Next() {
 				accounts = append(accounts, common.BytesToAddress(iter.Value()))
 			}
-			s.syncAccounts(accounts)
 			iter.Release()
-			t.Reset(time.Second * SyncIntervalBelow3P0)
-		}
-	}
-}
 
-func (s *Syncer) syncLiquidationAbove3P0() {
-	defer s.wg.Done()
-	db := s.db
-
-	t := time.NewTimer(0)
-	defer t.Stop()
-
-	count := 1
-	for {
-		select {
-		case <-s.quitCh:
-			return
-		case <-t.C:
-			fmt.Printf("%vth sync above 3.0 start @ %v\n", count, time.Now())
-			count++
-			var accounts []common.Address
-			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationAbove3P0Prefix), nil)
-			for iter.Next() {
-				accounts = append(accounts, common.BytesToAddress(iter.Value()))
-			}
 			s.syncAccounts(accounts)
-			iter.Release()
-			t.Reset(time.Second * SyncIntervalAbove3P0)
+			t.Reset(time.Second * SyncIntervalAbove2P0)
 		}
 	}
 }
@@ -636,9 +620,12 @@ func (s *Syncer) syncAccounts(accounts []common.Address) {
 func (s *Syncer) syncOneAccount(account common.Address) error {
 	ctx := context.Background()
 	comptroller := s.comptroller
-	symbols := s.symbols
-	tokens := s.tokens
 	vbep20s := s.vbep20s
+
+	s.m.Lock()
+	symbols := copySymbols(s.symbols)
+	tokens := copyTokens(s.tokens)
+	s.m.Unlock()
 
 	totalCollateral := big.NewFloat(0)
 	totalLoan := big.NewFloat(0)
@@ -721,9 +708,12 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPrices *FeededPrices) error {
 	ctx := context.Background()
 	comptroller := s.comptroller
-	symbols := s.symbols
-	tokens := s.tokens
 	vbep20s := s.vbep20s
+
+	s.m.Lock()
+	symbols := copySymbols(s.symbols)
+	tokens := copyTokens(s.tokens)
+	s.m.Unlock()
 
 	totalCollateral := big.NewFloat(0)
 	totalLoan := big.NewFloat(0)
@@ -863,16 +853,14 @@ func (s *Syncer) deleteAccount(account common.Address) {
 
 		if healthFactor.Cmp(BigFloat1P0) == -1 {
 			db.Delete(dbm.LiquidationBelow1P0StoreKey(accountBytes), nil)
-		} else if healthFactor.Cmp(BigFloat1P2) == -1 {
-			db.Delete(dbm.LiquidationBelow1P2StoreKey(accountBytes), nil)
+		} else if healthFactor.Cmp(BigFloat1P1) == -1 {
+			db.Delete(dbm.LiquidationBelow1P1StoreKey(accountBytes), nil)
 		} else if healthFactor.Cmp(BigFloat1P5) == -1 {
 			db.Delete(dbm.LiquidationBelow1P5StoreKey(accountBytes), nil)
 		} else if healthFactor.Cmp(BigFloat2P0) == -1 {
 			db.Delete(dbm.LiquidationBelow2P0StoreKey(accountBytes), nil)
-		} else if healthFactor.Cmp(BigFloat3P0) == -1 {
-			db.Delete(dbm.LiquidationBelow3P0StoreKey(accountBytes), nil)
 		} else {
-			db.Delete(dbm.LiquidationAbove3P0StoreKey(accountBytes), nil)
+			db.Delete(dbm.LiquidationAbove2P0StoreKey(accountBytes), nil)
 		}
 
 		db.Delete(dbm.AccountStoreKey(accountBytes), nil)
@@ -890,18 +878,32 @@ func (s *Syncer) storeAccount(account common.Address, info AccountInfo) {
 
 	if healthFactor.Cmp(BigFloat1P0) == -1 {
 		db.Put(dbm.LiquidationBelow1P0StoreKey(accountBytes), accountBytes, nil)
-	} else if healthFactor.Cmp(BigFloat1P2) == -1 {
-		db.Put(dbm.LiquidationBelow1P2StoreKey(accountBytes), accountBytes, nil)
+	} else if healthFactor.Cmp(BigFloat1P1) == -1 {
+		db.Put(dbm.LiquidationBelow1P1StoreKey(accountBytes), accountBytes, nil)
 	} else if healthFactor.Cmp(BigFloat1P5) == -1 {
 		db.Put(dbm.LiquidationBelow1P5StoreKey(accountBytes), accountBytes, nil)
 	} else if healthFactor.Cmp(BigFloat2P0) == -1 {
 		db.Put(dbm.LiquidationBelow2P0StoreKey(accountBytes), accountBytes, nil)
-	} else if healthFactor.Cmp(BigFloat3P0) == -1 {
-		db.Put(dbm.LiquidationBelow3P0StoreKey(accountBytes), accountBytes, nil)
 	} else {
-		db.Put(dbm.LiquidationAbove3P0StoreKey(accountBytes), accountBytes, nil)
+		db.Put(dbm.LiquidationAbove2P0StoreKey(accountBytes), accountBytes, nil)
 	}
 	bz, _ := json.Marshal(info)
 	db.Put(dbm.AccountStoreKey(accountBytes), bz, nil)
 	db.Put(dbm.BorrowersStoreKey(accountBytes), accountBytes, nil)
+}
+
+func copySymbols(src map[common.Address]string) map[common.Address]string {
+	dst := make(map[common.Address]string)
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+func copyTokens(src map[string]TokenInfo) map[string]TokenInfo {
+	dst := make(map[string]TokenInfo)
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
 }

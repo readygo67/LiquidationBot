@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/readygo67/LiquidationBot/config"
 	dbm "github.com/readygo67/LiquidationBot/db"
@@ -25,29 +26,24 @@ func Start(cfg *config.Config) error {
 	}
 	defer db.Close()
 
-	var startHeight uint64
+	startHeight := DefaultStartHeigt
+	var storedHeight uint64
 	exist, err := db.Has(dbm.LastHandledHeightStoreKey(), nil)
-	if !exist {
-		startHeight = DefaultStartHeigt
-	} else {
+	if exist {
 		bz, err := db.Get(dbm.LastHandledHeightStoreKey(), nil)
 		if err != nil {
 			return err
 		}
-		startHeight = big.NewInt(0).SetBytes(bz).Uint64()
+		storedHeight = big.NewInt(0).SetBytes(bz).Uint64()
+		startHeight = storedHeight
 	}
-
+	fmt.Printf("startHeight:%v, storedHeight:%v, configHeight:%v\n", startHeight, storedHeight, cfg.StartHeihgt)
 	if cfg.Override {
 		startHeight = cfg.StartHeihgt
 	}
-
 	err = db.Put(dbm.LastHandledHeightStoreKey(), big.NewInt(0).SetUint64(startHeight).Bytes(), nil)
 	if err != nil {
 		panic(err)
-	}
-
-	if cfg.Override {
-		startHeight = cfg.StartHeihgt
 	}
 
 	liquidationCh := make(chan *Liquidation, 64)

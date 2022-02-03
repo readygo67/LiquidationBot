@@ -38,21 +38,21 @@ func queryCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(
-		totalCommand(configFile),
-		accountCommand(configFile),
-		listCommand(configFile),
-		heightCommand(configFile),
+		totalCommand(&configFile),
+		accountCommand(&configFile),
+		listCommand(&configFile),
+		heightCommand(&configFile),
 	)
-	cmd.PersistentFlags().StringVarP(&configFile, "config", "f", "../config.yml", "config file (default is ../config.yaml)")
+	cmd.PersistentFlags().StringVarP(&configFile, "config", "f", "../config.yml", "config file (default is ../config.yml)")
 	return cmd
 }
 
-func totalCommand(configFile string) *cobra.Command {
+func totalCommand(configFile *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "total",
 		Short: "total accounts",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.New(configFile)
+			cfg, err := config.New(*configFile)
 			if err != nil {
 				return err
 			}
@@ -78,12 +78,12 @@ func totalCommand(configFile string) *cobra.Command {
 	return cmd
 }
 
-func heightCommand(configFile string) *cobra.Command {
+func heightCommand(configFile *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "height",
 		Short: "syncing height",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.New(configFile)
+			cfg, err := config.New(*configFile)
 			if err != nil {
 				return err
 			}
@@ -109,13 +109,13 @@ func heightCommand(configFile string) *cobra.Command {
 	return cmd
 }
 
-func accountCommand(configFile string) *cobra.Command {
+func accountCommand(configFile *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "account [0x...]",
 		Short: "account info",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.New(configFile)
+			cfg, err := config.New(*configFile)
 			if err != nil {
 				return err
 			}
@@ -147,15 +147,15 @@ func accountCommand(configFile string) *cobra.Command {
 	return cmd
 }
 
-func listCommand(configFile string) *cobra.Command {
+func listCommand(configFile *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list [1.0]",
 		Short: "list account whose health factor below assigned level",
 		Long: `list account whose health factor below assigned level, currently the following levels are provided
-               x<1.0, 1.0 <= x < 1.2, 1.2 <= x < 1.5, 1.5 <= x < 2.0, 2.0 <= x < 3, x > 3`,
+               x<1.0, 1.0 <= x < 1.2, 1.2 <= x < 1.5, 1.5 <= x < 2.0, x > 2.0`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.New(configFile)
+			cfg, err := config.New(*configFile)
 			if err != nil {
 				return err
 			}
@@ -177,27 +177,25 @@ func listCommand(configFile string) *cobra.Command {
 			var prefix []byte
 			if level.Cmp(server.BigFloat1P0) == -1 {
 				prefix = dbm.LiquidationBelow1P0Prefix
-			} else if level.Cmp(server.BigFloat1P2) == -1 {
-				prefix = dbm.LiquidationBelow1P2Prefix
+			} else if level.Cmp(server.BigFloat1P1) == -1 {
+				prefix = dbm.LiquidationBelow1P1Prefix
 			} else if level.Cmp(server.BigFloat1P5) == -1 {
 				prefix = dbm.LiquidationBelow1P5Prefix
 			} else if level.Cmp(server.BigFloat2P0) == -1 {
 				prefix = dbm.LiquidationBelow2P0Prefix
-			} else if level.Cmp(server.BigFloat3P0) == -1 {
-				prefix = dbm.LiquidationBelow3P0Prefix
 			} else {
-				prefix = dbm.LiquidationAbove3P0Prefix
+				prefix = dbm.LiquidationAbove2P0Prefix
 			}
-
-			var accounts []common.Address
 
 			iter := db.NewIterator(util.BytesPrefix(prefix), nil)
 			defer iter.Release()
+			count := 0
+			fmt.Printf("account below%v:\n", args[0])
 			for iter.Next() {
-				accounts = append(accounts, common.BytesToAddress(iter.Value()))
+				fmt.Printf("%v,", common.BytesToAddress(iter.Value()))
+				count++
 			}
-
-			fmt.Printf("account below%v:%v\n", args[0], accounts)
+			fmt.Printf("\n total:%v\n", count)
 			return nil
 		},
 	}

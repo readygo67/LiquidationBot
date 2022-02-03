@@ -75,37 +75,47 @@ func (liq *Liquidator) Run() {
 		select {
 		case <-liq.quitCh:
 			return
-		case pending := <-liq.liquidationCh:
-			fmt.Printf("recive liquidation:%v\n", pending)
-			pending.Endtime = time.Now().Add(time.Second * NormalLiquidationTime)
-			pendings = append(pendings, pending)
 
 		case pending := <-liq.priorityLiquidationCh:
 			fmt.Printf("receive priority liquidation:%v\n", pending)
 			pending.Endtime = time.Now().Add(time.Second * PriorityLiquidationTime)
 			priorityPendings = append(priorityPendings, pending)
 
+		case pending := <-liq.liquidationCh:
+			fmt.Printf("recive liquidation:%v\n", pending)
+			pending.Endtime = time.Now().Add(time.Second * NormalLiquidationTime)
+			pendings = append(pendings, pending)
+
 		case <-t.C:
 			num := len(pendings) + len(priorityPendings)
 			fmt.Printf("%vth liquidator, %vpending liquidations\n", count, num)
 			count++
-			for i, pending := range priorityPendings {
-				if pending.Endtime.Before(time.Now()) {
-					priorityPendings = append(priorityPendings[:i], priorityPendings[i+1:]...)
-					continue
+
+			var priorityRemains []*Liquidation
+			for _, pending := range priorityPendings {
+				if pending.Endtime.After(time.Now()) {
+					priorityRemains = append(priorityRemains, pending)
 				}
-				fmt.Printf("verify priority liquidation:%v", pending)
+			}
+			priorityPendings = priorityRemains
+			for _, pending := range priorityPendings {
+				fmt.Printf("verify priority liquidation:%v\n", pending)
 				//TODO(keep)
 			}
 
-			for i, pending := range pendings {
-				if pending.Endtime.Before(time.Now()) {
-					pendings = append(pendings[:i], pendings[i+1:]...)
-					continue
+			var remains []*Liquidation
+			for _, pending := range pendings {
+				if pending.Endtime.After(time.Now()) {
+					remains = append(remains, pending)
 				}
-				fmt.Printf("verify priority liquidation:%v", pending)
+			}
+
+			pendings = remains
+			for _, pending := range pendings {
+				fmt.Printf("verify pending liquidation:%v\n", pending)
 				//TODO(keep)
 			}
+
 			t.Reset(time.Second * 3)
 		}
 	}
