@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/readygo67/LiquidationBot/db"
 	"github.com/readygo67/LiquidationBot/venus"
+	"github.com/shopspring/decimal"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"math/big"
@@ -41,6 +42,15 @@ type Asset struct {
 	Symbol  string
 	Balance *big.Float
 	Loan    *big.Float
+}
+
+type AssetWithPrice struct {
+	Symbol       string
+	Decimals     uint8
+	Balance      *big.Float
+	Loan         *big.Float
+	Price        *big.Float
+	ExchangeRate *big.Float
 }
 
 type AccountInfo struct {
@@ -302,6 +312,9 @@ func (s *Syncer) doSyncMarketsAndPrices() {
 			//fmt.Printf("symbol:%v, market:%v, token:%v\n", symbol, market, token)
 			s.tokens[symbol] = token
 			s.symbols[market] = symbol
+			if s.vbep20s[market] == nil {
+				s.vbep20s[market] = vbep20
+			}
 			s.m.Unlock()
 		}()
 	}
@@ -620,11 +633,11 @@ func (s *Syncer) syncAccounts(accounts []common.Address) {
 func (s *Syncer) syncOneAccount(account common.Address) error {
 	ctx := context.Background()
 	comptroller := s.comptroller
-	vbep20s := s.vbep20s
 
 	s.m.Lock()
 	symbols := copySymbols(s.symbols)
 	tokens := copyTokens(s.tokens)
+	vbep20s := s.vbep20s
 	s.m.Unlock()
 
 	totalCollateral := big.NewFloat(0)
@@ -708,11 +721,11 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPrices *FeededPrices) error {
 	ctx := context.Background()
 	comptroller := s.comptroller
-	vbep20s := s.vbep20s
 
 	s.m.Lock()
 	symbols := copySymbols(s.symbols)
 	tokens := copyTokens(s.tokens)
+	vbep20s := s.vbep20s
 	s.m.Unlock()
 
 	totalCollateral := big.NewFloat(0)
@@ -824,6 +837,195 @@ func (s *Syncer) syncOneAccountWithIncreaseAccountNumber(account common.Address)
 		}
 	}
 	return nil
+}
+
+func (s *Syncer) calculateLiquidation(liquidation *Liquidation) error {
+	comptroller := s.comptroller
+	oracle := s.oracle
+	account := liquidation.Address
+
+	s.m.Lock()
+	symbols := copySymbols(s.symbols)
+	tokens := copyTokens(s.tokens)
+	vbep20s := s.vbep20s
+	s.m.Unlock()
+
+	totalCollateral := big.NewFloat(0)
+	totalLoan := big.NewFloat(0)
+
+	var assets []AssetWithPrice
+	//mintVAIS, err := comptroller.MintedVAIs(nil, account)
+	//if err != nil {
+	//	fmt.Printf("liquidate, fail to get MintedVAIs, err:%v\n", err)
+	//	return err
+	//}
+	//mintVAISFloatExp := big.NewFloat(0).SetInt(mintVAIS)
+	//mintVAISFloat := big.NewFloat(0).Quo(mintVAISFloatExp, ExpScaleFloat)
+
+	markets, err := comptroller.GetAssetsIn(nil, account)
+	if err != nil {
+		fmt.Printf("liquidate, fail to get GetAssetsIn, err:%v\n", err)
+		return err
+	}
+
+	closeFactor, err := comptroller.CloseFactorMantissa(nil)
+	if err != nil {
+		fmt.Printf("liquidate, fail to get closefactor, err:%v\n", err)
+		return err
+	}
+	closeFactorFloatExp := big.NewFloat(0).SetInt(closeFactor)
+	closeFactorFloat := big.NewFloat(0).Quo(closeFactorFloatExp, ExpScaleFloat)
+
+	liquidationIncentive, err := comptroller.LiquidationIncentiveMantissa(nil)
+	if err != nil {
+		fmt.Printf("liquidate, fail to get liquidatino incentive, err:%v\n", err)
+		return err
+	}
+	liquidationIncentiveFloatExp := big.NewFloat(0).SetInt(liquidationIncentive)
+	liquidationIncentiveFloat := big.NewFloat(0).Quo(liquidationIncentiveFloatExp, ExpScaleFloat)
+
+	for _, market := range markets {
+		//fmt.Printf("market:%v\n", market)
+		decimals, err := vbep20s[market].Decimals(nil)
+		if err != nil {
+			fmt.Printf("liquidate, fail to get decimal, err:%v\n", err)
+			return err
+		}
+
+		_, balance, borrow, exchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
+		if err != nil {
+			fmt.Printf("liquidate, fail to get GetAccountSnapshot, err:%v\n", err)
+			return err
+		}
+
+		price, err := oracle.GetUnderlyingPrice(nil, market)
+		if err != nil {
+			fmt.Printf("liquidate, fail to get underlying price, err:%v\n", err)
+			return err
+		}
+
+		priceFloatExp := big.NewFloat(0).SetInt(price)
+		priceFloat := big.NewFloat(0).Quo(priceFloatExp, ExpScaleFloat)
+
+		exchangeRateFloatExp := big.NewFloat(0).SetInt(exchangeRate)
+		exchangeRateFloat := big.NewFloat(0).Quo(exchangeRateFloatExp, ExpScaleFloat)
+
+		symbol := symbols[market]
+		collateralFactorFloat := tokens[symbol].CollateralFactorFloat
+
+		multiplier := big.NewFloat(0).Mul(exchangeRateFloat, collateralFactorFloat)
+		multiplier = big.NewFloat(0).Mul(multiplier, priceFloat)
+
+		balanceFloatExp := big.NewFloat(0).SetInt(balance)
+		balanceFloat := big.NewFloat(0).Quo(balanceFloatExp, ExpScaleFloat)
+		collateral := big.NewFloat(0).Mul(balanceFloat, multiplier)
+		totalCollateral = big.NewFloat(0).Add(totalCollateral, collateral)
+
+		borrowFloatExp := big.NewFloat(0).SetInt(borrow)
+		borrowFloat := big.NewFloat(0).Quo(borrowFloatExp, ExpScaleFloat)
+		loan := big.NewFloat(0).Mul(borrowFloat, priceFloat)
+		totalLoan = big.NewFloat(0).Add(totalLoan, loan)
+
+		//build account table
+		assets = append(assets, AssetWithPrice{
+			Symbol:       symbol,
+			Decimals:     decimals,
+			Balance:      collateral,
+			Loan:         loan,
+			Price:        priceFloat,
+			ExchangeRate: exchangeRateFloat,
+		})
+	}
+
+	//select the repayed token and seized collateral token
+	//totalLoan = big.NewFloat(0).Add(totalLoan, mintVAISFloat)
+	//repayLoanValue := big.NewFloat(0).Mul(totalLoan, closeFactorFloat)
+
+	//repayValue := big.NewFloat(0)
+	//repaySymbol := ""
+	//for _, asset := range assets {
+	//	if asset.Loan.Cmp(repayLoanValue) != -1 {
+	//		repayValue = repayLoanValue
+	//		repaySymbol = asset.Symbol
+	//		break
+	//	} else {
+	//		if asset.Loan.Cmp(repayValue) == 1 {
+	//			repaySymbol = asset.Symbol
+	//			repayValue = asset.Loan
+	//		}
+	//	}
+	//}
+	maxLoanValue := big.NewFloat(0)
+	maxLoanSymbol := ""
+	repayIndex := 0
+
+	for i, asset := range assets {
+		if asset.Loan.Cmp(maxLoanValue) == 1 {
+			maxLoanValue = asset.Loan
+			maxLoanSymbol = asset.Symbol
+			repayIndex = i
+		}
+	}
+	//the closeFactor applies to only single borrowed asset
+	maxRepayValue := big.NewFloat(0).Mul(maxLoanValue, closeFactorFloat)
+	repaySymbol := maxLoanSymbol
+
+	repayValue := big.NewFloat(0)
+	seizedCollateralSymbol := ""
+	seizedIndex := 0
+	for k, asset := range assets {
+		if asset.Balance.Cmp(maxRepayValue) != -1 {
+			repayValue = maxRepayValue
+			seizedCollateralSymbol = asset.Symbol
+			seizedIndex = k
+			break
+		} else {
+			if asset.Balance.Cmp(repayValue) == 1 {
+				repayValue = asset.Balance
+				seizedCollateralSymbol = asset.Symbol
+				seizedIndex = k
+			}
+		}
+	}
+
+	repayAmountFloat := big.NewFloat(0).Quo(repayValue, assets[repayIndex].Price)              //amount of underlyingtoken token
+	repayAmountFloat = big.NewFloat(0).Quo(repayAmountFloat, assets[repayIndex].ExchangeRate) //amount of cToken
+	repayAmountDecimal, err := decimal.NewFromString(repayAmountFloat.String())
+	if err != nil {
+		fmt.Printf("liquidate, fail to covert to repayAmount decinal, err:%v\n", err)
+		return err
+	}
+
+	repayAmount := repayAmountDecimal.Truncate(0)
+
+	errCode, seizedAmount, err := comptroller.LiquidateCalculateSeizeTokens(nil, tokens[repaySymbol].Address, tokens[seizedCollateralSymbol].address, repayAmount.BigInt())
+	fmt.Printf("errCode:%v, seizedAmount:%v, err:%v\n", errCode, seizedAmount, err)
+	//decimals := assets[repayIndex].Decimal
+	//DecimalScaleFloat := big.NewFloat(0).SetInt(big.NewInt(0).Exp(10, decimalw))
+	//repayAmountFloatExp := big.NewFloat(0).Mul(repayAmountFloat, DecimalScaleFloat)
+	//repayAmout := repayAmountFloatExp.
+	//
+	//seizedValue := big.NewFloat(0).Mul(repayValue, liquidationIncentiveFloat)
+	//seizedUnderlyingAmount := big.NewFloat(0).Quo(seizedValue, assets[seizedIndex].Price)
+	//seizedAmount := big.NewFloat(0).Quo(seizedUnderlyingAmount, assets[seizedIndex].ExchangeRate)
+	//decimalAmount, err := decimal.NewFromString(seizedAmount.String())
+	//if err != nil {
+	//	fmt.Printf("liquidate, fail to get underlying price, err:%v\n", err)
+	//	return err
+	//}
+	//
+	//decimal.New(1, decimals)
+
+	//actualRepayAmount = seizeTokens * priceCollateral * exchangeRate / (liquidationIncentive * priceBorrowed)
+	//repaysymbol, targetCollateralAmount, targeCollateralSymbol
+	//calculate profit
+	//
+	//flashLoanFee := ((amount * 25) / 9975) + 1;
+	//
+	//gasPrice, err := s.c.SuggestGasPrice(ctx)
+	//gas := 7000000
+	//fee :=
+	retun nil
 }
 
 func (s *Syncer) updateDB(account common.Address, info AccountInfo) {

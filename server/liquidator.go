@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/readygo67/LiquidationBot/venus"
 	"github.com/syndtr/goleveldb/leveldb"
+	"math/big"
 	"sync"
 	"time"
 )
@@ -16,11 +17,16 @@ const (
 	PriorityLiquidationTime = 180 //in secs
 )
 
+var (
+	BigIntZero = big.NewInt(0)
+)
+
 type Liquidator struct {
-	c                     *ethclient.Client
-	db                    *leveldb.DB
-	comptroller           *venus.Comptroller
-	oracle                *venus.Oracle
+	c           *ethclient.Client
+	db          *leveldb.DB
+	comptroller *venus.Comptroller
+	oracle      *venus.Oracle
+
 	wg                    sync.WaitGroup
 	quitCh                chan struct{}
 	liquidationCh         chan *Liquidation
@@ -120,3 +126,43 @@ func (liq *Liquidator) Run() {
 		}
 	}
 }
+
+//
+//func (liq *Liquidator) liquidate(liquidation *Liquidation) error {
+//	c := liq.c
+//	comptroller := liq.comptroller
+//	oracle := liq.oracle
+//
+//	account := liquidation.Address
+//
+//	errCode, liquidity, shortfall, err := comptroller.GetAccountLiquidity(nil, liquidation.Address)
+//	if errCode != nil {
+//		fmt.Printf("liquidate, errCode:%v, liquidation:%v\n", errCode, liquidation)
+//		return fmt.Errorf("errCode:%v", errCode)
+//	}
+//	if err != nil {
+//		fmt.Printf("liquidate, err:%v, liquidation:%v\n", err, liquidation)
+//		return err
+//	}
+//	if liquidity.Cmp(BigIntZero) == 1 && shortfall.Cmp(BigIntZero) != 1 {
+//		fmt.Printf("liquidate, local calculation error, liquidity:%v, shortfall:%v, liqiudation:%v\n", liquidity, shortfall, liquidation)
+//		return fmt.Errorf("liquidate, local calculation error, liquidity:%v, shortfall:%v, liqiudation:%v\n", liquidity, shortfall, liquidation)
+//	}
+//
+//	markets, err := comptroller.GetAssetsIn(nil, account)
+//	if err != nil {
+//		fmt.Printf("liquidator, fail to get GetAssetsIn, err:%v\n", err)
+//		return err
+//	}
+//
+//	for _, market := range markets {
+//		vbep20, err := venus.NewVbep20(market, c)
+//		_, balance, borrow, exchangeRate, err := vbep20.GetAccountSnapshot(nil, account)
+//		if err != nil {
+//			fmt.Printf("liquidator, fail to get GetAccountSnapshot, err:%v\n", err)
+//			return err
+//		}
+//	}
+//
+//	return nil
+//}
