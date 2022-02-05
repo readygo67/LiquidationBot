@@ -11,6 +11,7 @@ import (
 	"github.com/readygo67/LiquidationBot/config"
 	dbm "github.com/readygo67/LiquidationBot/db"
 	"github.com/readygo67/LiquidationBot/venus"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -167,112 +168,113 @@ func TestFilterAllCotractsBorrowEvent(t *testing.T) {
 	fmt.Printf("end Time:%v\n", time.Now())
 }
 
-func TestCalculateHealthFactorInFloat(t *testing.T) {
-	cfg, err := config.New("../config.yml")
-	require.NoError(t, err)
-	rpcURL := "http://42.3.146.198:21993"
-	c, err := ethclient.Dial(rpcURL)
-
-	db, err := dbm.NewDB("testdb1")
-	require.NoError(t, err)
-	defer db.Close()
-	defer os.RemoveAll("testdb1")
-
-	liquidationCh := make(chan *Liquidation, 64)
-	priorityliquidationCh := make(chan *Liquidation, 64)
-	feededPricesCh := make(chan *FeededPrices, 64)
-
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
-	comptroller := sync.comptroller
-	oracle := sync.oracle
-
-	accounts := []string{
-		"0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B",
-		//"0x332E2Dcd239Bb40d4eb31bcaE213F9F06017a4F3",
-		//"0xc528045078Ff53eA289fA42aF3e12D8eF901cABD",
-		//"0xF2ddE5689B0e13344231D3459B03432E97a48E0c",
-	}
-
-	for _, account := range accounts {
-		fmt.Printf("address:%v\n", account)
-		_, liquidity, shortfall, err := comptroller.GetAccountLiquidity(nil, common.HexToAddress(account))
-		require.NoError(t, err)
-
-		assets, err := comptroller.GetAssetsIn(nil, common.HexToAddress(account))
-		fmt.Printf("assets:%v\n", assets)
-		require.NoError(t, err)
-
-		totalCollateral := big.NewFloat(0)
-		totalLoan := big.NewFloat(0)
-		mintVAIS, err := comptroller.MintedVAIs(nil, common.HexToAddress(account))
-
-		mintVAISFloatExp := big.NewFloat(0).SetInt(mintVAIS)
-		mintVAISFloat := big.NewFloat(0).Quo(mintVAISFloatExp, ExpScaleFloat)
-
-		for _, asset := range assets {
-			//fmt.Printf("asset:%v\n", asset)
-			marketInfo, err := comptroller.Markets(nil, asset)
-			collateralFactor := marketInfo.CollateralFactorMantissa
-			require.NoError(t, err)
-
-			token, err := venus.NewVbep20(asset, c)
-			require.NoError(t, err)
-
-			_, balance, borrow, exchangeRate, err := token.GetAccountSnapshot(nil, common.HexToAddress(account))
-
-			price, err := oracle.GetUnderlyingPrice(nil, asset)
-			if price == big.NewInt(0) {
-				continue
-			}
-			fmt.Printf("collateralFactor:%v, price:%v, exchangeRate:%v, balance:%v, borrow:%v\n", collateralFactor, price, exchangeRate, balance, borrow)
-
-			exchangeRateFloatExp := big.NewFloat(0).SetInt(exchangeRate)
-			exchangeRateFloat := big.NewFloat(0).Quo(exchangeRateFloatExp, ExpScaleFloat)
-
-			collateralFactorFloatExp := big.NewFloat(0).SetInt(collateralFactor)
-			collateralFactorFloat := big.NewFloat(0).Quo(collateralFactorFloatExp, ExpScaleFloat)
-
-			priceFloatExp := big.NewFloat(0).SetInt(price)
-			priceFloat := big.NewFloat(0).Quo(priceFloatExp, ExpScaleFloat)
-
-			multiplier := big.NewFloat(0).Mul(exchangeRateFloat, collateralFactorFloat)
-			multiplier = big.NewFloat(0).Mul(multiplier, priceFloat)
-
-			balanceFloatExp := big.NewFloat(0).SetInt(balance)
-			balanceFloat := big.NewFloat(0).Quo(balanceFloatExp, ExpScaleFloat)
-
-			borrowFloatExp := big.NewFloat(0).SetInt(borrow)
-			borrowFloat := big.NewFloat(0).Quo(borrowFloatExp, ExpScaleFloat)
-
-			fmt.Printf("collateralFactor:%v, price:%v, exchangeRate:%v, balance:%v, borrow:%v\n", collateralFactorFloat, priceFloat, exchangeRateFloat, balanceFloat, borrowFloat)
-
-			collateral := big.NewFloat(0).Mul(balanceFloat, multiplier)
-			totalCollateral = big.NewFloat(0).Add(totalCollateral, collateral)
-
-			loan := big.NewFloat(0).Mul(borrowFloat, priceFloat)
-			totalLoan = big.NewFloat(0).Add(totalLoan, loan)
-		}
-
-		totalLoan = big.NewFloat(0).Add(totalLoan, mintVAISFloat)
-		fmt.Printf("totalCollateral:%v, totalLoan:%v\n", totalCollateral.String(), totalLoan)
-		healthFactor := big.NewFloat(100)
-		if totalLoan.Cmp(BigFloatZero) == 1 {
-			healthFactor = big.NewFloat(0).Quo(totalCollateral, totalLoan)
-		}
-
-		fmt.Printf("healthFactor：%v\n", healthFactor)
-		calculatedLiquidity := big.NewFloat(0)
-		calculatedShortfall := big.NewFloat(0)
-		if totalLoan.Cmp(totalCollateral) == 1 {
-			calculatedShortfall = big.NewFloat(0).Sub(totalLoan, totalCollateral)
-		} else {
-			calculatedLiquidity = big.NewFloat(0).Sub(totalCollateral, totalLoan)
-		}
-
-		fmt.Printf("liquidity:%v, calculatedLiquidity:%v\n", liquidity.String(), calculatedLiquidity.String())
-		fmt.Printf("shortfall:%v, calculatedShortfall:%v\n", shortfall, calculatedShortfall)
-	}
-}
+//
+//func TestCalculateHealthFactorInFloat(t *testing.T) {
+//	cfg, err := config.New("../config.yml")
+//	require.NoError(t, err)
+//	rpcURL := "http://42.3.146.198:21993"
+//	c, err := ethclient.Dial(rpcURL)
+//
+//	db, err := dbm.NewDB("testdb1")
+//	require.NoError(t, err)
+//	defer db.Close()
+//	defer os.RemoveAll("testdb1")
+//
+//	liquidationCh := make(chan *Liquidation, 64)
+//	priorityliquidationCh := make(chan *Liquidation, 64)
+//	feededPricesCh := make(chan *FeededPrices, 64)
+//
+//	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
+//	comptroller := sync.comptroller
+//	oracle := sync.oracle
+//
+//	accounts := []string{
+//		"0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B",
+//		//"0x332E2Dcd239Bb40d4eb31bcaE213F9F06017a4F3",
+//		//"0xc528045078Ff53eA289fA42aF3e12D8eF901cABD",
+//		//"0xF2ddE5689B0e13344231D3459B03432E97a48E0c",
+//	}
+//
+//	for _, account := range accounts {
+//		fmt.Printf("address:%v\n", account)
+//		_, liquidity, shortfall, err := comptroller.GetAccountLiquidity(nil, common.HexToAddress(account))
+//		require.NoError(t, err)
+//
+//		assets, err := comptroller.GetAssetsIn(nil, common.HexToAddress(account))
+//		fmt.Printf("assets:%v\n", assets)
+//		require.NoError(t, err)
+//
+//		totalCollateral := big.NewFloat(0)
+//		totalLoan := big.NewFloat(0)
+//		mintVAIS, err := comptroller.MintedVAIs(nil, common.HexToAddress(account))
+//
+//		mintVAISFloatExp := big.NewFloat(0).SetInt(mintVAIS)
+//		mintVAISFloat := big.NewFloat(0).Quo(mintVAISFloatExp, ExpScaleFloat)
+//
+//		for _, asset := range assets {
+//			//fmt.Printf("asset:%v\n", asset)
+//			marketInfo, err := comptroller.Markets(nil, asset)
+//			collateralFactor := marketInfo.CollateralFactorMantissa
+//			require.NoError(t, err)
+//
+//			token, err := venus.NewVbep20(asset, c)
+//			require.NoError(t, err)
+//
+//			_, balance, borrow, exchangeRate, err := token.GetAccountSnapshot(nil, common.HexToAddress(account))
+//
+//			price, err := oracle.GetUnderlyingPrice(nil, asset)
+//			if price == big.NewInt(0) {
+//				continue
+//			}
+//			fmt.Printf("collateralFactor:%v, price:%v, exchangeRate:%v, balance:%v, borrow:%v\n", collateralFactor, price, exchangeRate, balance, borrow)
+//
+//			exchangeRateFloatExp := big.NewFloat(0).SetInt(exchangeRate)
+//			exchangeRateFloat := big.NewFloat(0).Quo(exchangeRateFloatExp, ExpScaleFloat)
+//
+//			collateralFactorFloatExp := big.NewFloat(0).SetInt(collateralFactor)
+//			collateralFactorFloat := big.NewFloat(0).Quo(collateralFactorFloatExp, ExpScaleFloat)
+//
+//			priceFloatExp := big.NewFloat(0).SetInt(price)
+//			priceFloat := big.NewFloat(0).Quo(priceFloatExp, ExpScaleFloat)
+//
+//			multiplier := big.NewFloat(0).Mul(exchangeRateFloat, collateralFactorFloat)
+//			multiplier = big.NewFloat(0).Mul(multiplier, priceFloat)
+//
+//			balanceFloatExp := big.NewFloat(0).SetInt(balance)
+//			balanceFloat := big.NewFloat(0).Quo(balanceFloatExp, ExpScaleFloat)
+//
+//			borrowFloatExp := big.NewFloat(0).SetInt(borrow)
+//			borrowFloat := big.NewFloat(0).Quo(borrowFloatExp, ExpScaleFloat)
+//
+//			fmt.Printf("collateralFactor:%v, price:%v, exchangeRate:%v, balance:%v, borrow:%v\n", collateralFactorFloat, priceFloat, exchangeRateFloat, balanceFloat, borrowFloat)
+//
+//			collateral := big.NewFloat(0).Mul(balanceFloat, multiplier)
+//			totalCollateral = big.NewFloat(0).Add(totalCollateral, collateral)
+//
+//			loan := big.NewFloat(0).Mul(borrowFloat, priceFloat)
+//			totalLoan = big.NewFloat(0).Add(totalLoan, loan)
+//		}
+//
+//		totalLoan = big.NewFloat(0).Add(totalLoan, mintVAISFloat)
+//		fmt.Printf("totalCollateral:%v, totalLoan:%v\n", totalCollateral.String(), totalLoan)
+//		healthFactor := big.NewFloat(100)
+//		if totalLoan.Cmp(decimal.Zero) == 1 {
+//			healthFactor = big.NewFloat(0).Quo(totalCollateral, totalLoan)
+//		}
+//
+//		fmt.Printf("healthFactor：%v\n", healthFactor)
+//		calculatedLiquidity := big.NewFloat(0)
+//		calculatedShortfall := big.NewFloat(0)
+//		if totalLoan.Cmp(totalCollateral) == 1 {
+//			calculatedShortfall = big.NewFloat(0).Sub(totalLoan, totalCollateral)
+//		} else {
+//			calculatedLiquidity = big.NewFloat(0).Sub(totalCollateral, totalLoan)
+//		}
+//
+//		fmt.Printf("liquidity:%v, calculatedLiquidity:%v\n", liquidity.String(), calculatedLiquidity.String())
+//		fmt.Printf("shortfall:%v, calculatedShortfall:%v\n", shortfall, calculatedShortfall)
+//	}
+//}
 
 func TestStoreAndDeleteAccount(t *testing.T) {
 	cfg, err := config.New("../config.yml")
@@ -290,15 +292,16 @@ func TestStoreAndDeleteAccount(t *testing.T) {
 
 	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
 
-	healthFactor, _ := big.NewFloat(0).SetString("0.9")
-	vusdtBalance, _ := big.NewFloat(0).SetString("1000000000.0")
-	vusdtLoan, _ := big.NewFloat(0).SetString("0")
+	healthFactor, _ := decimal.NewFromString("0.9")
 
-	vbtcBalance, _ := big.NewFloat(0).SetString("2.5")
-	vbtctLoan, _ := big.NewFloat(0).SetString("0.2")
+	vusdtBalance, _ := decimal.NewFromString("1000000000.0")
+	vusdtLoan, _ := decimal.NewFromString("0")
 
-	vbusdBalance, _ := big.NewFloat(0).SetString("0")
-	vbusdtLoan, _ := big.NewFloat(0).SetString("500.23")
+	vbtcBalance, _ := decimal.NewFromString("2.5")
+	vbtctLoan, _ := decimal.NewFromString("0.2")
+
+	vbusdBalance, _ := decimal.NewFromString("0")
+	vbusdtLoan, _ := decimal.NewFromString("500.23")
 
 	assets := []Asset{
 		{
@@ -389,15 +392,15 @@ func TestStoreAndDeleteAccount1(t *testing.T) {
 
 	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
 
-	healthFactor, _ := big.NewFloat(0).SetString("1.1")
-	vusdtBalance, _ := big.NewFloat(0).SetString("1000000000.0")
-	vusdtLoan, _ := big.NewFloat(0).SetString("0")
+	healthFactor, _ := decimal.NewFromString("1.1")
+	vusdtBalance, _ := decimal.NewFromString("1000000000.0")
+	vusdtLoan, _ := decimal.NewFromString("0")
 
-	vbtcBalance, _ := big.NewFloat(0).SetString("2.5")
-	vbtctLoan, _ := big.NewFloat(0).SetString("0.2")
+	vbtcBalance, _ := decimal.NewFromString("2.5")
+	vbtctLoan, _ := decimal.NewFromString("0.2")
 
-	vbusdBalance, _ := big.NewFloat(0).SetString("0")
-	vbusdtLoan, _ := big.NewFloat(0).SetString("500.23")
+	vbusdBalance, _ := decimal.NewFromString("0")
+	vbusdtLoan, _ := decimal.NewFromString("500.23")
 
 	assets := []Asset{
 		{
@@ -456,8 +459,8 @@ func TestStoreAndDeleteAccount1(t *testing.T) {
 
 	sync.deleteAccount(account)
 
-	vsxpBalance, _ := big.NewFloat(0).SetString("236.5")
-	vsxpLoan, _ := big.NewFloat(0).SetString("800.23")
+	vsxpBalance, _ := decimal.NewFromString("236.5")
+	vsxpLoan, _ := decimal.NewFromString("800.23")
 
 	assets = append(assets, Asset{
 		Symbol:  "vSXP",
@@ -577,7 +580,7 @@ func TestSyncOneAccount(t *testing.T) {
 	var info AccountInfo
 	err = json.Unmarshal(bz, &info)
 	fmt.Printf("info:%v\n", info)
-	require.True(t, big.NewFloat(100).Cmp(info.HealthFactor) == 0)
+	require.True(t, decimal.NewFromInt(100).Cmp(info.HealthFactor) == 1)
 
 	bz, err = db.Get(dbm.LiquidationAbove2P0StoreKey(accountBytes), nil)
 	require.NoError(t, err)
@@ -744,7 +747,7 @@ func TestSyncOneAccountWithIncreaseAccountNumer(t *testing.T) {
 	var info AccountInfo
 	err = json.Unmarshal(bz, &info)
 	fmt.Printf("info:%v\n", info)
-	require.True(t, big.NewFloat(100).Cmp(info.HealthFactor) == 0)
+	require.True(t, decimal.NewFromInt(100).Cmp(info.HealthFactor) == 0)
 
 	bz, err = db.Get(dbm.LiquidationAbove2P0StoreKey(accountBytes), nil)
 	require.NoError(t, err)
@@ -769,17 +772,17 @@ func TestSyncOneAccountWithFeededPrices(t *testing.T) {
 	account := common.HexToAddress("0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B")
 	accountBytes := account.Bytes()
 
-	feededUsdtPrice, _ := big.NewFloat(0).SetString("1.02")
-	feededDogePrice, _ := big.NewFloat(0).SetString("0.04")
+	feededUsdtPrice, _ := decimal.NewFromString("1.02")
+	feededDogePrice, _ := decimal.NewFromString("0.04")
 	feededPrices := &FeededPrices{
 		Prices: []FeededPrice{
 			{
-				Address:    common.HexToAddress("0xec3422Ef92B2fb59e84c8B02Ba73F1fE84Ed8D71"),
-				PriceFloat: feededUsdtPrice,
+				Address: common.HexToAddress("0xec3422Ef92B2fb59e84c8B02Ba73F1fE84Ed8D71"),
+				Price:   feededUsdtPrice,
 			},
 			{
-				Address:    common.HexToAddress("0xfD5840Cd36d94D7229439859C0112a4185BC0255"),
-				PriceFloat: feededDogePrice,
+				Address: common.HexToAddress("0xfD5840Cd36d94D7229439859C0112a4185BC0255"),
+				Price:   feededDogePrice,
 			},
 		},
 		Height: 100000,
@@ -935,7 +938,7 @@ func TestCalculateSeizedToken(t *testing.T) {
 		Address: common.HexToAddress("0x0fe11130B1819e2E3E5e5308b9EA16fFDa2032a6"),
 	}
 
-	sync.calculateLiquidation(&liquidation)
+	sync.calculateRepayAmount(&liquidation)
 
 }
 

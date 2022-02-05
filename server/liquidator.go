@@ -7,7 +7,6 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/readygo67/LiquidationBot/venus"
 	"github.com/syndtr/goleveldb/leveldb"
-	"math/big"
 	"sync"
 	"time"
 )
@@ -15,10 +14,6 @@ import (
 const (
 	NormalLiquidationTime   = 18  // in secs
 	PriorityLiquidationTime = 180 //in secs
-)
-
-var (
-	BigIntZero = big.NewInt(0)
 )
 
 type Liquidator struct {

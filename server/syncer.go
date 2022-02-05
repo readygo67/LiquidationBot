@@ -33,35 +33,35 @@ const (
 )
 
 type TokenInfo struct {
-	Address               common.Address
-	CollateralFactorFloat *big.Float
-	PriceFloat            *big.Float
+	Address          common.Address
+	CollateralFactor decimal.Decimal
+	Price            decimal.Decimal
 }
 
 type Asset struct {
 	Symbol  string
-	Balance *big.Float
-	Loan    *big.Float
+	Balance decimal.Decimal
+	Loan    decimal.Decimal
 }
 
 type AssetWithPrice struct {
-	Symbol       string
-	Decimals     uint8
-	Balance      *big.Float
-	Loan         *big.Float
-	Price        *big.Float
-	ExchangeRate *big.Float
+	Symbol             string
+	UnderlyingDecimals uint8
+	Balance            decimal.Decimal
+	Loan               decimal.Decimal
+	Price              decimal.Decimal
+	ExchangeRate       decimal.Decimal
 }
 
 type AccountInfo struct {
-	HealthFactor *big.Float
+	HealthFactor decimal.Decimal
 	Assets       []Asset
 }
 
 type FeededPrice struct {
-	Address    common.Address
-	PriceFloat *big.Float
-	Hash       common.Hash
+	Address common.Address
+	Price   decimal.Decimal
+	Hash    common.Hash
 }
 
 type FeededPrices struct {
@@ -71,7 +71,7 @@ type FeededPrices struct {
 
 type Liquidation struct {
 	Address      common.Address
-	HealthFactor *big.Float
+	HealthFactor decimal.Decimal
 	BlockNumber  uint64
 	Endtime      time.Time
 }
@@ -79,13 +79,14 @@ type Liquidation struct {
 type semaphore chan struct{}
 
 var (
+	EXPSACLE         = decimal.New(1, 18)
 	ExpScaleFloat, _ = big.NewFloat(0).SetString("1000000000000000000")
-	BigFloatZero, _  = big.NewFloat(0).SetString("0")
-	BigFloat1P0, _   = big.NewFloat(0).SetString("1.0")
-	BigFloat1P1, _   = big.NewFloat(0).SetString("1.1")
-	BigFloat1P5, _   = big.NewFloat(0).SetString("1.5")
-	BigFloat2P0, _   = big.NewFloat(0).SetString("2.0")
-	BigFloat3P0, _   = big.NewFloat(0).SetString("3.0")
+	BigZero          = big.NewInt(0)
+	Decimal1P0, _    = decimal.NewFromString("1.0")
+	Decimal1P1, _    = decimal.NewFromString("1.1")
+	Decimal1P5, _    = decimal.NewFromString("1.5")
+	Decimal2P0, _    = decimal.NewFromString("2.0")
+	Decimal3P0, _    = decimal.NewFromString("3.0")
 )
 
 type Syncer struct {
@@ -174,20 +175,17 @@ func NewSyncer(
 				panic(err)
 			}
 
-			price, err := oracle.GetUnderlyingPrice(nil, market)
+			priceBig, err := oracle.GetUnderlyingPrice(nil, market)
 			if err != nil {
-				price = big.NewInt(0)
+				priceBig = big.NewInt(0)
 			}
-
-			collateralFactorFloatExp := big.NewFloat(0).SetInt(marketDetail.CollateralFactorMantissa)
-			collateralFactorFloat := big.NewFloat(0).Quo(collateralFactorFloatExp, ExpScaleFloat)
-			priceFloatExp := big.NewFloat(0).SetInt(price)
-			priceFloat := big.NewFloat(0).Quo(priceFloatExp, ExpScaleFloat)
+			collaterFactor := decimal.NewFromBigInt(marketDetail.CollateralFactorMantissa, 0)
+			price := decimal.NewFromBigInt(priceBig, 0)
 
 			token := TokenInfo{
-				Address:               market,
-				CollateralFactorFloat: collateralFactorFloat,
-				PriceFloat:            priceFloat,
+				Address:          market,
+				CollateralFactor: collaterFactor,
+				Price:            price,
 			}
 
 			m.Lock()
@@ -292,20 +290,15 @@ func (s *Syncer) doSyncMarketsAndPrices() {
 				return
 			}
 
-			price, err := oracle.GetUnderlyingPrice(nil, market)
+			priceBig, err := oracle.GetUnderlyingPrice(nil, market)
 			if err != nil {
-				price = big.NewInt(0)
+				priceBig = big.NewInt(0)
 			}
 
-			collateralFactorFloatExp := big.NewFloat(0).SetInt(marketDetail.CollateralFactorMantissa)
-			collateralFactorFloat := big.NewFloat(0).Quo(collateralFactorFloatExp, ExpScaleFloat)
-			priceFloatExp := big.NewFloat(0).SetInt(price)
-			priceFloat := big.NewFloat(0).Quo(priceFloatExp, ExpScaleFloat)
-
 			token := TokenInfo{
-				Address:               market,
-				CollateralFactorFloat: collateralFactorFloat,
-				PriceFloat:            priceFloat,
+				Address:          market,
+				CollateralFactor: decimal.NewFromBigInt(marketDetail.CollateralFactorMantissa, 0),
+				Price:            decimal.NewFromBigInt(priceBig, 0),
 			}
 
 			s.m.Lock()
@@ -640,18 +633,19 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 	vbep20s := s.vbep20s
 	s.m.Unlock()
 
-	totalCollateral := big.NewFloat(0)
-	totalLoan := big.NewFloat(0)
+	totalCollateral := decimal.NewFromInt(0)
+	totalLoan := decimal.NewFromInt(0)
 
 	var assets []Asset
-	mintVAIS, err := comptroller.MintedVAIs(nil, account)
+	bigMintedVAIS, err := comptroller.MintedVAIs(nil, account)
 	if err != nil {
 		fmt.Printf("syncOneAccount, fail to get MintedVAIs, err:%v\n", err)
 		return err
 	}
 
-	mintVAISFloatExp := big.NewFloat(0).SetInt(mintVAIS)
-	mintVAISFloat := big.NewFloat(0).Quo(mintVAISFloatExp, ExpScaleFloat)
+	mintedVAIS := decimal.NewFromBigInt(bigMintedVAIS, 0)
+	//mintVAISFloatExp := big.NewFloat(0).SetInt(mintVAIS)
+	//mintVAISFloat := big.NewFloat(0).Quo(mintVAISFloatExp, ExpScaleFloat)
 	markets, err := comptroller.GetAssetsIn(nil, account)
 	if err != nil {
 		fmt.Printf("syncOneAccount, fail to get GetAssetsIn, err:%v\n", err)
@@ -660,44 +654,49 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 
 	for _, market := range markets {
 		//fmt.Printf("market:%v\n", market)
-		_, balance, borrow, exchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
+		errCode, bigBalance, bigBorrow, bigExchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
 		if err != nil {
 			fmt.Printf("syncOneAccount, fail to get GetAccountSnapshot, err:%v\n", err)
 			return err
 		}
 
-		exchangeRateFloatExp := big.NewFloat(0).SetInt(exchangeRate)
-		exchangeRateFloat := big.NewFloat(0).Quo(exchangeRateFloatExp, ExpScaleFloat)
+		if errCode.Cmp(BigZero) != 0 {
+			fmt.Printf("syncOneAccount, fail to get GetAccountSnapshot, errCode:%v\n", errCode)
+			return err
+		}
+
+		if bigBalance.Cmp(BigZero) == 0 && bigBorrow.Cmp(BigZero) == 0 {
+			continue
+		}
 
 		symbol := symbols[market]
-		collateralFactorFloat := tokens[symbol].CollateralFactorFloat
-		priceFloat := tokens[symbol].PriceFloat
+		collateralFactor := tokens[symbol].CollateralFactor
+		price := tokens[symbol].Price
 
-		multiplier := big.NewFloat(0).Mul(exchangeRateFloat, collateralFactorFloat)
-		multiplier = big.NewFloat(0).Mul(multiplier, priceFloat)
+		exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
+		balance := decimal.NewFromBigInt(bigBalance, 0)
+		borrow := decimal.NewFromBigInt(bigBorrow, 0)
 
-		balanceFloatExp := big.NewFloat(0).SetInt(balance)
-		balanceFloat := big.NewFloat(0).Quo(balanceFloatExp, ExpScaleFloat)
-		collateral := big.NewFloat(0).Mul(balanceFloat, multiplier)
-		totalCollateral = big.NewFloat(0).Add(totalCollateral, collateral)
+		multiplier := collateralFactor.Mul(exchangeRate).Div(EXPSACLE)
+		multiplier = multiplier.Mul(price).Div(EXPSACLE)
+		collateral := balance.Mul(multiplier).Div(EXPSACLE)
+		totalCollateral = totalCollateral.Add(collateral.Truncate(0))
 
-		borrowFloatExp := big.NewFloat(0).SetInt(borrow)
-		borrowFloat := big.NewFloat(0).Quo(borrowFloatExp, ExpScaleFloat)
-		loan := big.NewFloat(0).Mul(borrowFloat, priceFloat)
-		totalLoan = big.NewFloat(0).Add(totalLoan, loan)
+		loan := borrow.Mul(price).Div(EXPSACLE)
+		totalLoan = totalLoan.Add(loan.Truncate(0))
 
 		//build account table
 		assets = append(assets, Asset{
 			Symbol:  symbol,
-			Balance: balanceFloat,
-			Loan:    borrowFloat,
+			Balance: balance,
+			Loan:    borrow,
 		})
 	}
 
-	totalLoan = big.NewFloat(0).Add(totalLoan, mintVAISFloat)
-	healthFactor := big.NewFloat(100)
-	if totalLoan.Cmp(BigFloatZero) == 1 {
-		healthFactor = big.NewFloat(0).Quo(totalCollateral, totalLoan)
+	totalLoan = totalLoan.Add(mintedVAIS)
+	healthFactor := decimal.New(100, 0)
+	if totalLoan.Cmp(decimal.Zero) == 1 {
+		healthFactor = totalCollateral.Div(totalLoan)
 	}
 	fmt.Printf("accout:%v, healthFactor:%v, totalCollateral:%v, totalLoan:%v\n", account, healthFactor, totalCollateral, totalLoan)
 	//update market table and account table
@@ -706,7 +705,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 		Assets:       assets,
 	}
 	s.updateDB(account, info)
-	if healthFactor.Cmp(big.NewFloat(1)) != 1 {
+	if healthFactor.Cmp(decimal.New(1, 0)) != 1 {
 		blockNumber, _ := s.c.BlockNumber(ctx)
 		liquidation := &Liquidation{
 			Address:      account,
@@ -728,62 +727,70 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 	vbep20s := s.vbep20s
 	s.m.Unlock()
 
-	totalCollateral := big.NewFloat(0)
-	totalLoan := big.NewFloat(0)
+	totalCollateral := decimal.NewFromInt(0)
+	totalLoan := decimal.NewFromInt(0)
 
-	mintVAIS, err := comptroller.MintedVAIs(nil, account)
+	bigMintedVAIS, err := comptroller.MintedVAIs(nil, account)
 	if err != nil {
 		return err
 	}
 
-	mintVAISFloatExp := big.NewFloat(0).SetInt(mintVAIS)
-	mintVAISFloat := big.NewFloat(0).Quo(mintVAISFloatExp, ExpScaleFloat)
+	mintedVAIS := decimal.NewFromBigInt(bigMintedVAIS, 0)
+
 	markets, err := comptroller.GetAssetsIn(nil, account)
 	if err != nil {
 		return err
 	}
 
 	for _, market := range markets {
-		_, balance, borrow, exchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
+		//fmt.Printf("market:%v\n", market)
+		errCode, bigBalance, bigBorrow, bigExchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
 		if err != nil {
+			fmt.Printf("syncOneAccount, fail to get GetAccountSnapshot, err:%v\n", err)
 			return err
 		}
 
-		exchangeRateFloatExp := big.NewFloat(0).SetInt(exchangeRate)
-		exchangeRateFloat := big.NewFloat(0).Quo(exchangeRateFloatExp, ExpScaleFloat)
+		if errCode.Cmp(BigZero) != 0 {
+			fmt.Printf("syncOneAccount, fail to get GetAccountSnapshot, errCode:%v\n", errCode)
+			return err
+		}
+
+		if bigBalance.Cmp(BigZero) == 0 && bigBorrow.Cmp(BigZero) == 0 {
+			continue
+		}
 
 		symbol := symbols[market]
-		collateralFactorFloat := tokens[symbol].CollateralFactorFloat
-		priceFloat := tokens[symbol].PriceFloat
-		//use feeded prices
+		collateralFactor := tokens[symbol].CollateralFactor
+		price := tokens[symbol].Price
+
+		//apply feeded prices if exist
 		for _, feededPrice := range feededPrices.Prices {
 			if tokens[symbol].Address == feededPrice.Address {
-				priceFloat = feededPrice.PriceFloat
+				price = feededPrice.Price
 			}
 		}
 
-		multiplier := big.NewFloat(0).Mul(exchangeRateFloat, collateralFactorFloat)
-		multiplier = big.NewFloat(0).Mul(multiplier, priceFloat)
+		exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
+		balance := decimal.NewFromBigInt(bigBalance, 0)
+		borrow := decimal.NewFromBigInt(bigBorrow, 0)
 
-		balanceFloatExp := big.NewFloat(0).SetInt(balance)
-		balanceFloat := big.NewFloat(0).Quo(balanceFloatExp, ExpScaleFloat)
-		collateral := big.NewFloat(0).Mul(balanceFloat, multiplier)
-		totalCollateral = big.NewFloat(0).Add(totalCollateral, collateral)
+		multiplier := collateralFactor.Mul(exchangeRate).Div(EXPSACLE)
+		multiplier = multiplier.Mul(price).Div(EXPSACLE)
+		collateral := balance.Mul(multiplier).Div(EXPSACLE)
+		totalCollateral = totalCollateral.Add(collateral.Truncate(0))
 
-		borrowFloatExp := big.NewFloat(0).SetInt(borrow)
-		borrowFloat := big.NewFloat(0).Quo(borrowFloatExp, ExpScaleFloat)
-		loan := big.NewFloat(0).Mul(borrowFloat, priceFloat)
-		totalLoan = big.NewFloat(0).Add(totalLoan, loan)
+		loan := borrow.Mul(price).Div(EXPSACLE)
+		totalLoan = totalLoan.Add(loan.Truncate(0))
 	}
 
-	totalLoan = big.NewFloat(0).Add(totalLoan, mintVAISFloat)
-	healthFactor := big.NewFloat(100)
-	if totalLoan.Cmp(BigFloatZero) == 1 {
-		healthFactor = big.NewFloat(0).Quo(totalCollateral, totalLoan)
+	totalLoan = totalLoan.Add(mintedVAIS)
+	healthFactor := decimal.NewFromInt(100)
+	if totalLoan.Cmp(decimal.Zero) == 1 {
+		healthFactor = totalCollateral.Div(totalLoan)
 	}
 	fmt.Printf("account:%v, healthFactor:%v, totalCollateral:%v, totalLoan:%v \n", account, healthFactor, totalCollateral, totalLoan)
 
-	if healthFactor.Cmp(big.NewFloat(1)) != 1 {
+	if healthFactor.Cmp(decimal.NewFromInt(1)) != 1 {
 		blockNumber, _ := s.c.BlockNumber(ctx)
 		liquidation := &Liquidation{
 			Address:      account,
@@ -868,90 +875,94 @@ func (s *Syncer) calculateRepayAmount(liquidation *Liquidation) error {
 		return err
 	}
 
-	closeFactor, err := comptroller.CloseFactorMantissa(nil)
+	bigCloseFactor, err := comptroller.CloseFactorMantissa(nil)
 	if err != nil {
 		fmt.Printf("liquidate, fail to get closefactor, err:%v\n", err)
 		return err
 	}
-	
-	closeFactorFloatExp := big.NewFloat(0).SetInt(closeFactor)
-	closeFactorFloat := big.NewFloat(0).Quo(closeFactorFloatExp, ExpScaleFloat)
+	closeFactor := decimal.NewFromBigInt(bigCloseFactor, 0)
 
-	liquidationIncentive, err := comptroller.LiquidationIncentiveMantissa(nil)
-	if err != nil {
-		fmt.Printf("liquidate, fail to get liquidatino incentive, err:%v\n", err)
-		return err
-	}
-	liquidationIncentiveFloatExp := big.NewFloat(0).SetInt(liquidationIncentive)
-	liquidationIncentiveFloat := big.NewFloat(0).Quo(liquidationIncentiveFloatExp, ExpScaleFloat)
+	//liquidationIncentive, err := comptroller.LiquidationIncentiveMantissa(nil)
+	//if err != nil {
+	//	fmt.Printf("liquidate, fail to get liquidatino incentive, err:%v\n", err)
+	//	return err
+	//}
+	//liquidationIncentiveD := decimal.NewFromBigInt(liquidationIncentive, 0)
 
 	for _, market := range markets {
-		//fmt.Printf("market:%v\n", market)
-		//underlyingTokenAddress, err := vbep20s[market].Underlying(nil)
-		//if err != nil {
-		//	fmt.Printf("liquidate, fail to get underlying token, err:%v\n", err)
-		//	return err
-		//}
+		underlyingTokenAddress, err := vbep20s[market].Underlying(nil)
+		if err != nil {
+			fmt.Printf("liquidate, fail to get underlying token, err:%v\n", err)
+			return err
+		}
+		bep20, err := venus.NewVbep20(underlyingTokenAddress, s.c)
+		if err != nil {
+			fmt.Printf("liquidate, fail to build bep20, err:%v\n", err)
+			return err
+		}
 
-		//decimals, err := vbep20s[underlyingTokenAddress].Decimals(nil)
-		//if err != nil {
-		//	fmt.Printf("liquidate, fail to get decimal, err:%v\n", err)
-		//	return err
-		//}
-		decimals := uint8(18)
+		decimals, err := bep20.Decimals(nil)
+		if err != nil {
+			fmt.Printf("liquidate, fail to get decimal, err:%v\n", err)
+			return err
+		}
 
-		_, balance, borrow, exchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
+		errCode, bigBalance, bigBorrow, bigExchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
 		if err != nil {
 			fmt.Printf("liquidate, fail to get GetAccountSnapshot, err:%v\n", err)
 			return err
 		}
 
-		price, err := oracle.GetUnderlyingPrice(nil, market)
+		if errCode.Cmp(BigZero) != 0 {
+			fmt.Printf("liquidate, fail to get GetAccountSnapshot, errCode:%v\n", errCode)
+			return err
+		}
+
+		if bigBalance.Cmp(BigZero) == 0 && bigBorrow.Cmp(BigZero) == 0 {
+			continue
+		}
+
+		fmt.Printf("balance:%v, borrow:%v, exchangeRate:%v\n", bigBalance, bigBorrow, bigExchangeRate)
+
+		bigPrice, err := oracle.GetUnderlyingPrice(nil, market)
 		if err != nil {
 			fmt.Printf("liquidate, fail to get underlying price, err:%v\n", err)
 			return err
 		}
 
-		priceFloatExp := big.NewFloat(0).SetInt(price)
-		priceFloat := big.NewFloat(0).Quo(priceFloatExp, ExpScaleFloat)
-
-		exchangeRateFloatExp := big.NewFloat(0).SetInt(exchangeRate)
-		exchangeRateFloat := big.NewFloat(0).Quo(exchangeRateFloatExp, ExpScaleFloat)
+		price := decimal.NewFromBigInt(bigPrice, 0)
+		exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
+		balance := decimal.NewFromBigInt(bigBalance, 0)
+		borrow := decimal.NewFromBigInt(bigBorrow, 0)
 
 		symbol := symbols[market]
-		collateralFactorFloat := tokens[symbol].CollateralFactorFloat
+		collateralFactor := tokens[symbol].CollateralFactor
 
-		multiplier := big.NewFloat(0).Mul(exchangeRateFloat, collateralFactorFloat)
-		multiplier = big.NewFloat(0).Mul(multiplier, priceFloat)
+		multiplier := collateralFactor.Mul(exchangeRate).Div(EXPSACLE)
+		multiplier = multiplier.Mul(price).Div(EXPSACLE)
+		collateralD := balance.Mul(multiplier).Div(EXPSACLE)
+		totalCollateral = totalCollateral.Add(collateralD.Truncate(0))
 
-		balanceFloatExp := big.NewFloat(0).SetInt(balance)
-		balanceFloat := big.NewFloat(0).Quo(balanceFloatExp, ExpScaleFloat)
-		collateral := big.NewFloat(0).Mul(balanceFloat, multiplier)
-		totalCollateral = big.NewFloat(0).Add(totalCollateral, collateral)
+		loan := borrow.Mul(price).Div(EXPSACLE)
+		totalLoan = totalLoan.Add(loan.Truncate(0))
 
-		borrowFloatExp := big.NewFloat(0).SetInt(borrow)
-		borrowFloat := big.NewFloat(0).Quo(borrowFloatExp, ExpScaleFloat)
-		loan := big.NewFloat(0).Mul(borrowFloat, priceFloat)
-		totalLoan = big.NewFloat(0).Add(totalLoan, loan)
-
+		asset := AssetWithPrice{
+			Symbol:             symbol,
+			UnderlyingDecimals: decimals,
+			Balance:            collateralD,
+			Loan:               loan,
+			Price:              price,
+			ExchangeRate:       exchangeRate,
+		}
 		//build account table
-		assets = append(assets, AssetWithPrice{
-			Symbol:       symbol,
-			Decimals:     decimals,
-			Balance:      collateral,
-			Loan:         loan,
-			Price:        priceFloat,
-			ExchangeRate: exchangeRateFloat,
-		})
+		fmt.Printf("asset:%+v, address:%v\n", asset, tokens[asset.Symbol].Address)
+		assets = append(assets, asset)
 	}
 
-	for _, asset := range assets {
-		fmt.Printf("asset:%+v, addres:%v\n", asset, tokens[asset.Symbol].Address)
-	}
-	fmt.Printf("totalBalance:%v, totalLoan:%v, shortfall:%v\n", totalCollateral, totalLoan, big.NewFloat(0).Sub(totalLoan, totalCollateral))
+	fmt.Printf("totalBalance:%v, totalLoan:%v, shortfall:%v\n", totalCollateral, totalLoan, totalLoan.Sub(totalCollateral))
 
 	//select the repayed token and seized collateral token
-	maxLoanValue := big.NewFloat(0)
+	maxLoanValue := decimal.NewFromInt(0)
 	maxLoanSymbol := ""
 	repayIndex := 0
 
@@ -963,10 +974,10 @@ func (s *Syncer) calculateRepayAmount(liquidation *Liquidation) error {
 		}
 	}
 	//the closeFactor applies to only single borrowed asset
-	maxRepayValue := big.NewFloat(0).Mul(maxLoanValue, closeFactorFloat)
+	maxRepayValue := maxLoanValue.Mul(closeFactor).Div(EXPSACLE)
 	repaySymbol := maxLoanSymbol
 
-	repayValue := big.NewFloat(0)
+	repayValue := decimal.NewFromInt(0)
 	seizedCollateralSymbol := ""
 	seizedIndex := 0
 	for k, asset := range assets {
@@ -986,34 +997,39 @@ func (s *Syncer) calculateRepayAmount(liquidation *Liquidation) error {
 
 	fmt.Printf("repaySmbol:%v repayValue:%v, seizedSymbol:%v\n", repaySymbol, repayValue, seizedCollateralSymbol)
 
-	repayAmountFloat := big.NewFloat(0).Quo(repayValue, assets[repayIndex].Price) //amount of underlyingtoken token
-	fmt.Printf("repayValue:%v, price:%v, amount:%v\n", repayValue, assets[repayIndex].Price, repayAmountFloat)
+	repayAmout := repayValue.Mul(EXPSACLE).Div(assets[repayIndex].Price)
+
+	//repayAmountFloat := big.NewFloat(0).Quo(repayValue, assets[repayIndex].Price) //amount of underlyingtoken token
+	fmt.Printf("repayValue:%v, price:%v, amount:%v\n", repayValue, assets[repayIndex].Price, repayAmout)
 
 	//repayAmountFloat = big.NewFloat(0).Quo(repayAmountFloat, assets[repayIndex].ExchangeRate) //amount of cToken
 
-	repayAmountDecimal, err := decimal.NewFromString(repayAmountFloat.String())
-	if err != nil {
-		fmt.Printf("liquidate, fail to covert to repayAmount decinal, err:%v\n", err)
-		return err
-	}
+	//repayAmountDecimal, err := decimal.NewFromString(repayAmountFloat.String())
+	//if err != nil {
+	//	fmt.Printf("liquidate, fail to covert to repayAmount decinal, err:%v\n", err)
+	//	return err
+	//}
 
-	repayAmountDecimal = repayAmountDecimal.Mul(decimal.New(1, int32(assets[repayIndex].Decimals)))
-	repayAmount := repayAmountDecimal.Truncate(0)
-	fmt.Printf("repayAmountDecimal:%v, repayAmount:%v, repayAmountFloat:%v\n", repayAmountDecimal, repayAmount, repayAmountFloat)
+	//repayAmountDecimal = repayAmountDecimal.Mul(decimal.New(1, int32(assets[repayIndex].Decimals)))
+	repayAmount := repayAmout.Truncate(0)
+	fmt.Printf("repayAmountDecimal:%v, repayAmount:%v\n", repayAmout, repayAmount)
 	errCode, seizedAmount, err := comptroller.LiquidateCalculateSeizeTokens(nil, tokens[repaySymbol].Address, tokens[seizedCollateralSymbol].Address, repayAmount.BigInt())
 	fmt.Printf("errCode:%v, seizedAmount:%v, err:%v\n", errCode, seizedAmount, err)
 
-	seizedAmountExpFloat := big.NewFloat(0).SetInt(seizedAmount)
-	seizedUnderlyingTokenAmountExpFloat := big.NewFloat(0).Mul(seizedAmountExpFloat, assets[seizedIndex].ExchangeRate)
-	seizedUnderlyingTokenAmountFloat := big.NewFloat(0).Quo(seizedUnderlyingTokenAmountExpFloat, ExpScaleFloat)
-	seizedUnderlyingTokenValue := big.NewFloat(0).Mul(seizedUnderlyingTokenAmountFloat, assets[seizedIndex].Price)
+	seizedAmountD := decimal.NewFromBigInt(seizedAmount, 0)
+	seizedUnderlyingTokenAmountD := seizedAmountD.Mul(assets[seizedIndex].ExchangeRate).Div(EXPSACLE)
+	seizedUnderlyingTokenValue := seizedUnderlyingTokenAmountD.Mul(assets[seizedIndex].Price).Div(EXPSACLE)
+	//seizedAmountExpFloat := big.NewFloat(0).SetInt(seizedAmount)
+	//seizedUnderlyingTokenAmountExpFloat := big.NewFloat(0).Mul(seizedAmountExpFloat, assets[seizedIndex].ExchangeRate)
+	//seizedUnderlyingTokenAmountFloat := big.NewFloat(0).Quo(seizedUnderlyingTokenAmountExpFloat, ExpScaleFloat)
+	//seizedUnderlyingTokenValue := big.NewFloat(0).Mul(seizedUnderlyingTokenAmountFloat, assets[seizedIndex].Price)
 
 	fmt.Printf("seizedUnderlyingTokenValue:%v", seizedUnderlyingTokenValue)
 
-	ratio := big.NewFloat(0).Quo(seizedUnderlyingTokenValue, repayValue)
+	ratio := seizedUnderlyingTokenValue.Div(repayValue)
 	fmt.Printf("ratio:%v\n", ratio)
 
-	fmt.Printf("seizedIndex:%v, liquidationIncentiveFloat:%v\n", seizedIndex, liquidationIncentiveFloat)
+	//fmt.Printf("seizedIndex:%v, liquidationIncentiveFloat:%v\n", seizedIndex, liquidationIncentiveFloat)
 	//decimals := assets[repayIndex].Decimal
 	//DecimalScaleFloat := big.NewFloat(0).SetInt(big.NewInt(0).Exp(10, decimalw))
 	//repayAmountFloatExp := big.NewFloat(0).Mul(repayAmountFloat, DecimalScaleFloat)
@@ -1067,13 +1083,13 @@ func (s *Syncer) deleteAccount(account common.Address) {
 			db.Delete(dbm.MarketStoreKey([]byte(asset.Symbol), accountBytes), nil)
 		}
 
-		if healthFactor.Cmp(BigFloat1P0) == -1 {
+		if healthFactor.Cmp(Decimal1P0) == -1 {
 			db.Delete(dbm.LiquidationBelow1P0StoreKey(accountBytes), nil)
-		} else if healthFactor.Cmp(BigFloat1P1) == -1 {
+		} else if healthFactor.Cmp(Decimal1P1) == -1 {
 			db.Delete(dbm.LiquidationBelow1P1StoreKey(accountBytes), nil)
-		} else if healthFactor.Cmp(BigFloat1P5) == -1 {
+		} else if healthFactor.Cmp(Decimal1P5) == -1 {
 			db.Delete(dbm.LiquidationBelow1P5StoreKey(accountBytes), nil)
-		} else if healthFactor.Cmp(BigFloat2P0) == -1 {
+		} else if healthFactor.Cmp(Decimal2P0) == -1 {
 			db.Delete(dbm.LiquidationBelow2P0StoreKey(accountBytes), nil)
 		} else {
 			db.Delete(dbm.LiquidationAbove2P0StoreKey(accountBytes), nil)
@@ -1092,13 +1108,13 @@ func (s *Syncer) storeAccount(account common.Address, info AccountInfo) {
 		db.Put(dbm.MarketStoreKey([]byte(asset.Symbol), accountBytes), accountBytes, nil)
 	}
 
-	if healthFactor.Cmp(BigFloat1P0) == -1 {
+	if healthFactor.Cmp(Decimal1P0) == -1 {
 		db.Put(dbm.LiquidationBelow1P0StoreKey(accountBytes), accountBytes, nil)
-	} else if healthFactor.Cmp(BigFloat1P1) == -1 {
+	} else if healthFactor.Cmp(Decimal1P1) == -1 {
 		db.Put(dbm.LiquidationBelow1P1StoreKey(accountBytes), accountBytes, nil)
-	} else if healthFactor.Cmp(BigFloat1P5) == -1 {
+	} else if healthFactor.Cmp(Decimal1P5) == -1 {
 		db.Put(dbm.LiquidationBelow1P5StoreKey(accountBytes), accountBytes, nil)
-	} else if healthFactor.Cmp(BigFloat2P0) == -1 {
+	} else if healthFactor.Cmp(Decimal2P0) == -1 {
 		db.Put(dbm.LiquidationBelow2P0StoreKey(accountBytes), accountBytes, nil)
 	} else {
 		db.Put(dbm.LiquidationAbove2P0StoreKey(accountBytes), accountBytes, nil)

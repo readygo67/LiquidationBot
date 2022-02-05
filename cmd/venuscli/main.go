@@ -175,13 +175,13 @@ func listCommand(configFile *string) *cobra.Command {
 			}
 
 			var prefix []byte
-			if level.Cmp(server.BigFloat1P0) == -1 {
+			if level.Cmp(server.Decimal1P0) == -1 {
 				prefix = dbm.LiquidationBelow1P0Prefix
-			} else if level.Cmp(server.BigFloat1P1) == -1 {
+			} else if level.Cmp(server.Decimal1P1) == -1 {
 				prefix = dbm.LiquidationBelow1P1Prefix
-			} else if level.Cmp(server.BigFloat1P5) == -1 {
+			} else if level.Cmp(server.Decimal1P5) == -1 {
 				prefix = dbm.LiquidationBelow1P5Prefix
-			} else if level.Cmp(server.BigFloat2P0) == -1 {
+			} else if level.Cmp(server.Decimal2P0) == -1 {
 				prefix = dbm.LiquidationBelow2P0Prefix
 			} else {
 				prefix = dbm.LiquidationAbove2P0Prefix
