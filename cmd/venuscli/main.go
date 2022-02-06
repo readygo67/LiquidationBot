@@ -7,6 +7,7 @@ import (
 	"github.com/readygo67/LiquidationBot/config"
 	dbm "github.com/readygo67/LiquidationBot/db"
 	"github.com/readygo67/LiquidationBot/server"
+	"github.com/shopspring/decimal"
 	"github.com/spf13/cobra"
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"math/big"
@@ -169,8 +170,8 @@ func listCommand(configFile *string) *cobra.Command {
 				return err
 			}
 
-			level, ok := big.NewFloat(0).SetString(args[0])
-			if !ok {
+			level, err := decimal.NewFromString(args[0])
+			if err != nil {
 				return fmt.Errorf("invalid parameter")
 			}
 

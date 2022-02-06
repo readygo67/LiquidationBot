@@ -24,23 +24,6 @@ import (
 
 var syncer *Syncer
 
-//func TestMain(m *testing.M){
-//	cfg, err := config.New("../config.yml")
-//	rpcURL := "http://42.3.146.198:21993"
-//	c, err := ethclient.Dial(rpcURL)
-//
-//	db, err := dbm.NewDB("testdb1")
-//	if err != nil{
-//		panic(err)
-//	}
-//
-//	defer db.Close()
-//	defer os.RemoveAll("testdb1")
-//
-//	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle)
-//
-//}
-
 func TestGetvAAVEUnderlyingPrice(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
@@ -53,6 +36,40 @@ func TestGetvAAVEUnderlyingPrice(t *testing.T) {
 	//fail to get vAAVE prices @ 20220201
 	_, err = oracle.GetUnderlyingPrice(nil, common.HexToAddress("0x26DA28954763B92139ED49283625ceCAf52C6f94"))
 	require.Equal(t, "execution reverted: REF_DATA_NOT_AVAILABLE", err.Error())
+}
+
+func TestGetUnderlyingDecimal(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	comptroller, err := venus.NewComptroller(common.HexToAddress(cfg.Comptroller), c)
+	require.NoError(t, err)
+
+	markets, err := comptroller.GetAllMarkets(nil)
+	require.NoError(t, err)
+
+	for _, market := range markets {
+
+		vbep20, err := venus.NewVbep20(market, c)
+		require.NoError(t, err)
+
+		symbol, err := vbep20.Symbol(nil)
+		require.NoError(t, err)
+		fmt.Printf("market:%v, symbol:%v\n", market, symbol)
+		underlyingAddress, err := vbep20.Underlying(nil)
+		require.NoError(t, err)
+
+		bep20, err := venus.NewVbep20(underlyingAddress, c)
+		underlyingDecimals, err := bep20.Decimals(nil)
+		require.NoError(t, err)
+
+		underlyingSybmol, err := bep20.Symbol(nil)
+		require.NoError(t, err)
+
+		fmt.Printf("symbol:%v, underlyingSymbol:%v, underlyingDecimals:%v\n", symbol, underlyingSybmol, underlyingDecimals)
+	}
+
 }
 
 func TestNewSyncer(t *testing.T) {
@@ -168,113 +185,103 @@ func TestFilterAllCotractsBorrowEvent(t *testing.T) {
 	fmt.Printf("end Time:%v\n", time.Now())
 }
 
-//
-//func TestCalculateHealthFactorInFloat(t *testing.T) {
-//	cfg, err := config.New("../config.yml")
-//	require.NoError(t, err)
-//	rpcURL := "http://42.3.146.198:21993"
-//	c, err := ethclient.Dial(rpcURL)
-//
-//	db, err := dbm.NewDB("testdb1")
-//	require.NoError(t, err)
-//	defer db.Close()
-//	defer os.RemoveAll("testdb1")
-//
-//	liquidationCh := make(chan *Liquidation, 64)
-//	priorityliquidationCh := make(chan *Liquidation, 64)
-//	feededPricesCh := make(chan *FeededPrices, 64)
-//
-//	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
-//	comptroller := sync.comptroller
-//	oracle := sync.oracle
-//
-//	accounts := []string{
-//		"0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B",
-//		//"0x332E2Dcd239Bb40d4eb31bcaE213F9F06017a4F3",
-//		//"0xc528045078Ff53eA289fA42aF3e12D8eF901cABD",
-//		//"0xF2ddE5689B0e13344231D3459B03432E97a48E0c",
-//	}
-//
-//	for _, account := range accounts {
-//		fmt.Printf("address:%v\n", account)
-//		_, liquidity, shortfall, err := comptroller.GetAccountLiquidity(nil, common.HexToAddress(account))
-//		require.NoError(t, err)
-//
-//		assets, err := comptroller.GetAssetsIn(nil, common.HexToAddress(account))
-//		fmt.Printf("assets:%v\n", assets)
-//		require.NoError(t, err)
-//
-//		totalCollateral := big.NewFloat(0)
-//		totalLoan := big.NewFloat(0)
-//		mintVAIS, err := comptroller.MintedVAIs(nil, common.HexToAddress(account))
-//
-//		mintVAISFloatExp := big.NewFloat(0).SetInt(mintVAIS)
-//		mintVAISFloat := big.NewFloat(0).Quo(mintVAISFloatExp, ExpScaleFloat)
-//
-//		for _, asset := range assets {
-//			//fmt.Printf("asset:%v\n", asset)
-//			marketInfo, err := comptroller.Markets(nil, asset)
-//			collateralFactor := marketInfo.CollateralFactorMantissa
-//			require.NoError(t, err)
-//
-//			token, err := venus.NewVbep20(asset, c)
-//			require.NoError(t, err)
-//
-//			_, balance, borrow, exchangeRate, err := token.GetAccountSnapshot(nil, common.HexToAddress(account))
-//
-//			price, err := oracle.GetUnderlyingPrice(nil, asset)
-//			if price == big.NewInt(0) {
-//				continue
-//			}
-//			fmt.Printf("collateralFactor:%v, price:%v, exchangeRate:%v, balance:%v, borrow:%v\n", collateralFactor, price, exchangeRate, balance, borrow)
-//
-//			exchangeRateFloatExp := big.NewFloat(0).SetInt(exchangeRate)
-//			exchangeRateFloat := big.NewFloat(0).Quo(exchangeRateFloatExp, ExpScaleFloat)
-//
-//			collateralFactorFloatExp := big.NewFloat(0).SetInt(collateralFactor)
-//			collateralFactorFloat := big.NewFloat(0).Quo(collateralFactorFloatExp, ExpScaleFloat)
-//
-//			priceFloatExp := big.NewFloat(0).SetInt(price)
-//			priceFloat := big.NewFloat(0).Quo(priceFloatExp, ExpScaleFloat)
-//
-//			multiplier := big.NewFloat(0).Mul(exchangeRateFloat, collateralFactorFloat)
-//			multiplier = big.NewFloat(0).Mul(multiplier, priceFloat)
-//
-//			balanceFloatExp := big.NewFloat(0).SetInt(balance)
-//			balanceFloat := big.NewFloat(0).Quo(balanceFloatExp, ExpScaleFloat)
-//
-//			borrowFloatExp := big.NewFloat(0).SetInt(borrow)
-//			borrowFloat := big.NewFloat(0).Quo(borrowFloatExp, ExpScaleFloat)
-//
-//			fmt.Printf("collateralFactor:%v, price:%v, exchangeRate:%v, balance:%v, borrow:%v\n", collateralFactorFloat, priceFloat, exchangeRateFloat, balanceFloat, borrowFloat)
-//
-//			collateral := big.NewFloat(0).Mul(balanceFloat, multiplier)
-//			totalCollateral = big.NewFloat(0).Add(totalCollateral, collateral)
-//
-//			loan := big.NewFloat(0).Mul(borrowFloat, priceFloat)
-//			totalLoan = big.NewFloat(0).Add(totalLoan, loan)
-//		}
-//
-//		totalLoan = big.NewFloat(0).Add(totalLoan, mintVAISFloat)
-//		fmt.Printf("totalCollateral:%v, totalLoan:%v\n", totalCollateral.String(), totalLoan)
-//		healthFactor := big.NewFloat(100)
-//		if totalLoan.Cmp(decimal.Zero) == 1 {
-//			healthFactor = big.NewFloat(0).Quo(totalCollateral, totalLoan)
-//		}
-//
-//		fmt.Printf("healthFactor：%v\n", healthFactor)
-//		calculatedLiquidity := big.NewFloat(0)
-//		calculatedShortfall := big.NewFloat(0)
-//		if totalLoan.Cmp(totalCollateral) == 1 {
-//			calculatedShortfall = big.NewFloat(0).Sub(totalLoan, totalCollateral)
-//		} else {
-//			calculatedLiquidity = big.NewFloat(0).Sub(totalCollateral, totalLoan)
-//		}
-//
-//		fmt.Printf("liquidity:%v, calculatedLiquidity:%v\n", liquidity.String(), calculatedLiquidity.String())
-//		fmt.Printf("shortfall:%v, calculatedShortfall:%v\n", shortfall, calculatedShortfall)
-//	}
-//}
+func TestCalculateHealthFactor(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	require.NoError(t, err)
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, feededPricesCh, liquidationCh, priorityliquidationCh)
+	comptroller := sync.comptroller
+	oracle := sync.oracle
+
+	accounts := []string{
+		//"0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B",
+		//"0x332E2Dcd239Bb40d4eb31bcaE213F9F06017a4F3",
+		//"0xc528045078Ff53eA289fA42aF3e12D8eF901cABD",
+		"0xF2ddE5689B0e13344231D3459B03432E97a48E0c",
+	}
+
+	for _, account := range accounts {
+		_, liquidity, shortfall, err := comptroller.GetAccountLiquidity(nil, common.HexToAddress(account))
+		require.NoError(t, err)
+
+		assets, err := comptroller.GetAssetsIn(nil, common.HexToAddress(account))
+		fmt.Printf("assets:%v\n", assets)
+		require.NoError(t, err)
+
+		totalCollateral := decimal.NewFromInt(0)
+		totalLoan := decimal.NewFromInt(0)
+		bigMintedVAIS, err := comptroller.MintedVAIs(nil, common.HexToAddress(account))
+
+		mintedVAIS := decimal.NewFromBigInt(bigMintedVAIS, 0)
+
+		for _, asset := range assets {
+			//fmt.Printf("asset:%v\n", asset)
+			marketInfo, err := comptroller.Markets(nil, asset)
+			require.NoError(t, err)
+
+			token, err := venus.NewVbep20(asset, c)
+			require.NoError(t, err)
+
+			errCode, bigBalance, bigBorrow, bigExchangeRate, err := token.GetAccountSnapshot(nil, common.HexToAddress(account))
+			require.NoError(t, err)
+			require.True(t, errCode.Cmp(BigZero) == 0)
+
+			if bigBalance.Cmp(BigZero) == 0 && bigBorrow.Cmp(BigZero) == 0 {
+				continue
+			}
+
+			bigPrice, err := oracle.GetUnderlyingPrice(nil, asset)
+			if bigPrice.Cmp(BigZero) == 0 {
+				continue
+			}
+
+			exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
+			collateralFactor := decimal.NewFromBigInt(marketInfo.CollateralFactorMantissa, 0)
+			price := decimal.NewFromBigInt(bigPrice, 0)
+			balance := decimal.NewFromBigInt(bigBalance, 0)
+			borrow := decimal.NewFromBigInt(bigBorrow, 0)
+			fmt.Printf("collateralFactor:%v, price:%v, exchangeRate:%v, balance:%v, borrow:%v\n", collateralFactor, bigPrice, bigExchangeRate, bigBalance, bigBorrow)
+
+			multiplier := collateralFactor.Mul(exchangeRate).Div(EXPSACLE)
+			multiplier = multiplier.Mul(price).Div(EXPSACLE)
+			collateral := balance.Mul(multiplier).Div(EXPSACLE)
+			totalCollateral = totalCollateral.Add(collateral.Truncate(0))
+
+			loan := borrow.Mul(price).Div(EXPSACLE)
+			totalLoan = totalLoan.Add(loan.Truncate(0))
+		}
+
+		totalLoan = totalLoan.Add(mintedVAIS)
+		fmt.Printf("totalCollateral:%v, totalLoan:%v\n", totalCollateral.String(), totalLoan)
+		healthFactor := decimal.NewFromInt(100)
+		if totalLoan.Cmp(decimal.Zero) == 1 {
+			healthFactor = totalCollateral.Div(totalLoan)
+		}
+
+		fmt.Printf("healthFactor：%v\n", healthFactor)
+		calculatedLiquidity := decimal.NewFromInt(0)
+		calculatedShortfall := decimal.NewFromInt(0)
+		if totalLoan.Cmp(totalCollateral) == 1 {
+			calculatedShortfall = totalLoan.Sub(totalCollateral)
+		} else {
+			calculatedLiquidity = totalCollateral.Sub(totalLoan)
+		}
+
+		fmt.Printf("liquidity:%v, calculatedLiquidity:%v\n", liquidity.String(), calculatedLiquidity.String())
+		fmt.Printf("shortfall:%v, calculatedShortfall:%v\n", shortfall, calculatedShortfall)
+	}
+}
 
 func TestStoreAndDeleteAccount(t *testing.T) {
 	cfg, err := config.New("../config.yml")
@@ -435,11 +442,11 @@ func TestStoreAndDeleteAccount1(t *testing.T) {
 	err = json.Unmarshal(bz, &got)
 	require.NoError(t, err)
 
-	has, err := db.Has(dbm.LiquidationBelow1P1StoreKey(account.Bytes()), nil)
+	has, err := db.Has(dbm.LiquidationBelow1P5StoreKey(account.Bytes()), nil)
 	require.NoError(t, err)
 	require.True(t, has)
 
-	bz, err = db.Get(dbm.LiquidationBelow1P1StoreKey(account.Bytes()), nil)
+	bz, err = db.Get(dbm.LiquidationBelow1P5StoreKey(account.Bytes()), nil)
 	require.NoError(t, err)
 	require.Equal(t, bz, account.Bytes())
 
@@ -500,20 +507,21 @@ func TestCalculateExchangeRate(t *testing.T) {
 	//totalBorrow: 2298168762317337651162
 	//totalReserver:  4713643651873292071
 	//cash: 13136365928522364031146
-	borrow, _ := big.NewInt(0).SetString("2298168762317337651162", 10)
-	supply, _ := big.NewInt(0).SetString("76384766592957", 10)
-	reserve, _ := big.NewInt(0).SetString("4713643651873292071", 10)
-	cash, _ := big.NewInt(0).SetString("13136365928522364031146", 10)
-	sum := big.NewInt(0).Add(cash, borrow)
-	sum = big.NewInt(0).Sub(sum, reserve)
-	//rate := big.NewInt(0).Div(sum, supply)
-	//fmt.Printf("rate:%v\n", rate)
+	borrow, _ := decimal.NewFromString("2298168762317337651162")
+	supply, _ := decimal.NewFromString("76384766592957")
+	reserve, _ := decimal.NewFromString("4713643651873292071")
+	cash, _ := decimal.NewFromString("13136365928522364031146")
+	sum := cash.Add(borrow)
+	sum = sum.Sub(reserve)
+	rate := sum.Div(supply)
+	fmt.Printf("rate:%v\n", rate)
 
-	ExpScale, _ := big.NewInt(0).SetString("1000000000000000000", 10)
-	sumExp := big.NewInt(0).Mul(sum, ExpScale)
-	rateExp := big.NewInt(0).Div(sumExp, supply)
-	//fmt.Printf("rateExp:%v\n", rateExp)
-	require.Equal(t, "202001285536565656590891932", rateExp.String())
+	rateExp := sum.Mul(EXPSACLE).Div(supply)
+	//ExpScale, _ := big.NewInt(0).SetString("1000000000000000000", 10)
+	//sumExp := big.NewInt(0).Mul(sum, ExpScale)
+	//rateExp := big.NewInt(0).Div(sumExp, supply)
+	////fmt.Printf("rateExp:%v\n", rateExp)
+	require.Equal(t, "202001285536565656590891932", rateExp.Truncate(0).String())
 }
 
 func TestSyncOneAccount(t *testing.T) {
@@ -582,7 +590,7 @@ func TestSyncOneAccount(t *testing.T) {
 	fmt.Printf("info:%v\n", info)
 	require.True(t, decimal.NewFromInt(100).Cmp(info.HealthFactor) == 1)
 
-	bz, err = db.Get(dbm.LiquidationAbove2P0StoreKey(accountBytes), nil)
+	bz, err = db.Get(dbm.LiquidationBelow1P1StoreKey(accountBytes), nil)
 	require.NoError(t, err)
 	require.Equal(t, account, common.BytesToAddress(bz))
 }
@@ -938,7 +946,7 @@ func TestCalculateSeizedToken(t *testing.T) {
 		Address: common.HexToAddress("0x0fe11130B1819e2E3E5e5308b9EA16fFDa2032a6"),
 	}
 
-	sync.calculateRepayAmount(&liquidation)
+	sync.calculateSeizedTokenAmount(&liquidation)
 
 }
 
