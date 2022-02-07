@@ -105,7 +105,7 @@ type Syncer struct {
 	pancakeFactory      *venus.IPancakeFactory
 	closeFactor         decimal.Decimal
 	symbols             map[common.Address]string
-	tokens              map[string]TokenInfo
+	tokens              map[string]*TokenInfo
 	vbep20s             map[common.Address]*venus.Vbep20
 	syncDone            bool
 	m                   sync.Mutex
@@ -182,7 +182,7 @@ func NewSyncer(
 	}
 
 	symbols := make(map[common.Address]string)
-	tokens := make(map[string]TokenInfo)
+	tokens := make(map[string]*TokenInfo)
 	vbep20s := make(map[common.Address]*venus.Vbep20)
 
 	var wg sync.WaitGroup
@@ -235,7 +235,7 @@ func NewSyncer(
 			collaterFactor := decimal.NewFromBigInt(marketDetail.CollateralFactorMantissa, 0)
 			price := decimal.NewFromBigInt(bigPrice, 0)
 
-			token := TokenInfo{
+			token := &TokenInfo{
 				Address:            market,
 				UnderlyingAddress:  underlyingAddress,
 				UnderlyingDecimals: underlyingDecimals,
@@ -360,20 +360,15 @@ func (s *Syncer) doSyncMarketsAndPrices() {
 				bigPrice = big.NewInt(0)
 			}
 
-			token := TokenInfo{
-				Address:          market,
-				CollateralFactor: decimal.NewFromBigInt(marketDetail.CollateralFactorMantissa, 0),
-				Price:            decimal.NewFromBigInt(bigPrice, 0),
+			s.m.Lock()
+			defer s.m.Unlock()
+			if s.tokens[symbol] != nil {
+				s.tokens[symbol].CollateralFactor = decimal.NewFromBigInt(marketDetail.CollateralFactorMantissa, 0)
+				s.tokens[symbol].Price = decimal.NewFromBigInt(bigPrice, 0)
+			} else {
+				fmt.Printf("a new symbol:%v added, please restart venusd\n", symbol)
 			}
 
-			s.m.Lock()
-			//fmt.Printf("symbol:%v, market:%v, token:%v\n", symbol, market, token)
-			s.tokens[symbol] = token
-			s.symbols[market] = symbol
-			if s.vbep20s[market] == nil {
-				s.vbep20s[market] = vbep20
-			}
-			s.m.Unlock()
 		}()
 	}
 	wg.Wait()
@@ -1104,7 +1099,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	flashLoanFeeValue := flashLoanFeeAmount.Mul(assets[repayIndex].Price).Div(EXPSACLE) //in 10^18 U
 	flashLoanReturnAmount := repayAmount.Add(flashLoanFeeAmount.Truncate(0))
 
-	bigGasPrice, err := s.c.SuggestGasPrice(nil)
+	bigGasPrice, err := s.c.SuggestGasPrice(context.Background())
 	if err != nil {
 		bigGasPrice = big.NewInt(5)
 	}
@@ -1253,8 +1248,8 @@ func copySymbols(src map[common.Address]string) map[common.Address]string {
 	return dst
 }
 
-func copyTokens(src map[string]TokenInfo) map[string]TokenInfo {
-	dst := make(map[string]TokenInfo)
+func copyTokens(src map[string]*TokenInfo) map[string]*TokenInfo {
+	dst := make(map[string]*TokenInfo)
 	for k, v := range src {
 		dst[k] = v
 	}

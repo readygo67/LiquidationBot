@@ -24,6 +24,15 @@ import (
 
 var syncer *Syncer
 
+func TestMapStructAssignment(t *testing.T) {
+	testmap := make(map[string]*TokenInfo)
+	tokenInfo := &TokenInfo{
+		Price: decimal.Zero,
+	}
+	testmap["usdt"] = tokenInfo
+	testmap["usdt"].Price = decimal.NewFromInt(1)
+}
+
 func TestGetvAAVEUnderlyingPrice(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
@@ -1041,7 +1050,7 @@ func TestCalculateSeizedTokenGetAmountsOutWithMulOverFlow1(t *testing.T) {
 
 	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, feededPricesCh, liquidationCh, priorityliquidationCh)
 	liquidation := Liquidation{
-		Address: common.HexToAddress("37535d067e76e0cef4ac9808133c373fb53e5686"),
+		Address: common.HexToAddress("0x0e0c57ae65739394b405bc3afc5003be9f858fdb"),
 	}
 
 	err = sync.calculateSeizedTokenAmount(&liquidation)
