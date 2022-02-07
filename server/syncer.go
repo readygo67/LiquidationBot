@@ -1086,7 +1086,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	seizedCTokenAmount := decimal.NewFromBigInt(bigSeizedCTokenAmount, 0)
 	seizedUnderlyingTokenAmount := seizedCTokenAmount.Mul(assets[seizedIndex].ExchangeRate).Div(EXPSACLE)
 	seizedUnderlyingTokenValue := seizedUnderlyingTokenAmount.Mul(assets[seizedIndex].Price).Div(EXPSACLE)
-	fmt.Printf("account:%v,repaySmbol:%v, repayAddress:%v repayValue:%v, repayAmount:%v seizedSymbol:%v, seizedAddress:%v, seizedCTokenAmount:%v, seizedUnderlyingTokenAmount:%v, seizedUnderlyingTokenValue:%v\n", account, repaySymbol, tokens[repaySymbol].Address, repayValue, repayAmount, seizedSymbol, tokens[seizedSymbol].Address, seizedCTokenAmount, seizedUnderlyingTokenAmount, seizedUnderlyingTokenValue)
+	fmt.Printf("height%v,account:%v,repaySmbol:%v, repayAddress:%v repayValue:%v, repayAmount:%v seizedSymbol:%v, seizedAddress:%v, seizedCTokenAmount:%v, seizedUnderlyingTokenAmount:%v, seizedUnderlyingTokenValue:%v\n", currentHeight, account, repaySymbol, tokens[repaySymbol].Address, repayValue, repayAmount, seizedSymbol, tokens[seizedSymbol].Address, seizedCTokenAmount, seizedUnderlyingTokenAmount, seizedUnderlyingTokenValue)
 
 	ratio := seizedUnderlyingTokenValue.Div(repayValue)
 	if ratio.Cmp(decimal.NewFromFloat32(1.11)) == 1 || ratio.Cmp(decimal.NewFromFloat32(1.09)) == -1 {
