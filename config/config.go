@@ -6,13 +6,14 @@ import (
 )
 
 type Config struct {
-	RPCURL      string `yaml:"rpc_url"`
-	Network     string `yaml:"network"`
-	Oracle      string `yaml:"oracle"`
-	Comptroller string `yaml:"comptroller"`
-	DB          string `yaml:"db"`
-	StartHeihgt uint64 `yaml:"start_heihgt"`
-	Override    bool   `yaml:"override"`
+	RPCURL        string `yaml:"rpc_url"`
+	Network       string `yaml:"network"`
+	Oracle        string `yaml:"oracle"`
+	Comptroller   string `yaml:"comptroller"`
+	PancakeRouter string `yaml:"pancake_router"`
+	DB            string `yaml:"db"`
+	StartHeihgt   uint64 `yaml:"start_heihgt"`
+	Override      bool   `yaml:"override"`
 }
 
 // Setup init config
