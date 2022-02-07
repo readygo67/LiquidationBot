@@ -998,7 +998,56 @@ func TestCalculateSeizedToken1(t *testing.T) {
 	if err != nil {
 		t.Logf(err.Error())
 	}
+}
 
+func TestCalculateSeizedTokenGetAmountsOutWithMulOverFlow(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, feededPricesCh, liquidationCh, priorityliquidationCh)
+	liquidation := Liquidation{
+		Address: common.HexToAddress("1e73902ab4144299dfc2ac5a3765122c02ce889f"),
+	}
+
+	err = sync.calculateSeizedTokenAmount(&liquidation)
+	if err != nil {
+		t.Logf(err.Error())
+	}
+}
+
+func TestCalculateSeizedTokenGetAmountsOutWithMulOverFlow1(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, feededPricesCh, liquidationCh, priorityliquidationCh)
+	liquidation := Liquidation{
+		Address: common.HexToAddress("37535d067e76e0cef4ac9808133c373fb53e5686"),
+	}
+
+	err = sync.calculateSeizedTokenAmount(&liquidation)
+	if err != nil {
+		t.Logf(err.Error())
+	}
 }
 
 func TestCalculateSeizedTokens(t *testing.T) {

@@ -118,6 +118,10 @@ type Syncer struct {
 	priortyLiquidationCh chan *Liquidation
 }
 
+func init() {
+
+}
+
 func (s semaphore) Acquire() {
 	s <- struct{}{}
 }
@@ -758,7 +762,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 	if totalLoan.Cmp(decimal.Zero) == 1 {
 		healthFactor = totalCollateral.Div(totalLoan)
 	}
-	fmt.Printf("accout:%v, healthFactor:%v, totalCollateral:%v, totalLoan:%v\n", account, healthFactor, totalCollateral, totalLoan)
+	//fmt.Printf("accout:%v, healthFactor:%v, totalCollateral:%v, totalLoan:%v\n", account, healthFactor, totalCollateral, totalLoan)
 	//update market table and account table
 	info := AccountInfo{
 		HealthFactor: healthFactor,
@@ -1126,8 +1130,16 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 		}
 		var paths = make([]common.Address, 2)
 		if pairAddress.String() == "0x0000000000000000000000000000000000000000" {
+			var intermediateAddress common.Address
+			if seizedSymbol != "vUSDT" && repaySymbol != "vUSDT" {
+				intermediateAddress = tokens["vUSDT"].UnderlyingAddress
+			} else if seizedSymbol != "vUSDC" && repaySymbol != "vUSDC" {
+				intermediateAddress = tokens["vUSDC"].UnderlyingAddress
+			} else if seizedSymbol != "vBUSD" && repaySymbol != "vBUSD" {
+				intermediateAddress = tokens["vBUSD"].UnderlyingAddress
+			}
 			paths[0] = tokens[seizedSymbol].UnderlyingAddress
-			paths[1] = tokens["vUSDT"].UnderlyingAddress
+			paths[1] = intermediateAddress
 			paths = append(paths, tokens[repaySymbol].UnderlyingAddress)
 		} else {
 			paths[0] = tokens[seizedSymbol].UnderlyingAddress
@@ -1136,7 +1148,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 		amountIns, err := pancakeRouter.GetAmountsIn(callOptions, flashLoanReturnAmount.BigInt(), paths)
 		if err != nil {
-			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAmountsIn, paths:%v, err:%v\n", paths, err)
+			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAmountsIn, account:%V, paths:%v, err:%v\n", account, paths, err)
 			return err
 		}
 		fmt.Printf("calculate amounts for flashLoanReturnAmount result, paths:%+v, swap %v%v for %v%v\n", paths, amountIns[0], strings.TrimPrefix(seizedSymbol, "v"), flashLoanFeeAmount.Truncate(0), strings.TrimPrefix(repaySymbol, "v"))
@@ -1149,7 +1161,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 		amountsOut, err := pancakeRouter.GetAmountsOut(callOptions, remain.Truncate(0).BigInt(), paths)
 		if err != nil {
-			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAmountsOut, paths:%v, err:%v\n", paths, err)
+			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAmountsOut, account:%v paths:%v, err:%v\n", account, paths, err)
 			return err
 		}
 
