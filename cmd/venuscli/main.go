@@ -7,6 +7,7 @@ import (
 	"github.com/readygo67/LiquidationBot/config"
 	dbm "github.com/readygo67/LiquidationBot/db"
 	"github.com/readygo67/LiquidationBot/server"
+	"github.com/shopspring/decimal"
 	"github.com/spf13/cobra"
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"math/big"
@@ -169,19 +170,19 @@ func listCommand(configFile *string) *cobra.Command {
 				return err
 			}
 
-			level, ok := big.NewFloat(0).SetString(args[0])
-			if !ok {
+			level, err := decimal.NewFromString(args[0])
+			if err != nil {
 				return fmt.Errorf("invalid parameter")
 			}
 
 			var prefix []byte
-			if level.Cmp(server.BigFloat1P0) == -1 {
+			if level.Cmp(server.Decimal1P0) == -1 {
 				prefix = dbm.LiquidationBelow1P0Prefix
-			} else if level.Cmp(server.BigFloat1P1) == -1 {
+			} else if level.Cmp(server.Decimal1P1) == -1 {
 				prefix = dbm.LiquidationBelow1P1Prefix
-			} else if level.Cmp(server.BigFloat1P5) == -1 {
+			} else if level.Cmp(server.Decimal1P5) == -1 {
 				prefix = dbm.LiquidationBelow1P5Prefix
-			} else if level.Cmp(server.BigFloat2P0) == -1 {
+			} else if level.Cmp(server.Decimal2P0) == -1 {
 				prefix = dbm.LiquidationBelow2P0Prefix
 			} else {
 				prefix = dbm.LiquidationAbove2P0Prefix
