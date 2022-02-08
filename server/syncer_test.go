@@ -108,6 +108,14 @@ func TestNewSyncer(t *testing.T) {
 
 	num := big.NewInt(0).SetBytes(bz)
 	require.Equal(t, int64(0), num.Int64())
+
+	for symbol, pair := range sync.flashLoanPool {
+		t.Logf("%v's flashloan pool is:%v\n", symbol, pair)
+	}
+
+	for symbolPair, paths := range sync.uniswapPaths {
+		t.Logf("%v's paths is:%v\n", symbolPair, paths)
+	}
 }
 
 func TestDoSyncMarketsAndPrices(t *testing.T) {
@@ -156,6 +164,290 @@ func TestSyncMarketsAndPrices(t *testing.T) {
 	verifyTokens(t, sync)
 }
 
+func TestFormulateUniswapPath1(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, feededPricesCh, liquidationCh, priorityliquidationCh)
+	tokens := sync.tokens
+	//pancakeRouter := sync.pancakeRouter
+	pancakeFactory := sync.pancakeFactory
+
+	pair, err := pancakeFactory.GetPair(nil, tokens["vLTC"].UnderlyingAddress, tokens["vXVS"].UnderlyingAddress)
+	require.NoError(t, err)
+	fmt.Printf("pair:%v\n", pair)
+	pair, err = pancakeFactory.GetPair(nil, tokens["vLTC"].UnderlyingAddress, tokens["vBNB"].UnderlyingAddress)
+	require.NoError(t, err)
+	fmt.Printf("vLTCvBNB pair:%v\n", pair)
+	pair, err = pancakeFactory.GetPair(nil, tokens["vLTC"].UnderlyingAddress, tokens["vUSDT"].UnderlyingAddress)
+	require.NoError(t, err)
+	fmt.Printf("vLTCvUSDT pair:%v\n", pair)
+	pair, err = pancakeFactory.GetPair(nil, tokens["vLTC"].UnderlyingAddress, tokens["vDAI"].UnderlyingAddress)
+	require.NoError(t, err)
+	fmt.Printf("vLTCvDAI pair:%v\n", pair)
+	pair, err = pancakeFactory.GetPair(nil, tokens["vLTC"].UnderlyingAddress, tokens["vUSDC"].UnderlyingAddress)
+	require.NoError(t, err)
+	fmt.Printf("vLTCvUSDC pair:%v\n", pair)
+	pair, err = pancakeFactory.GetPair(nil, tokens["vLTC"].UnderlyingAddress, tokens["vTUSD"].UnderlyingAddress)
+	require.NoError(t, err)
+	fmt.Printf("vLTCvTUSD pair:%v\n", pair)
+}
+
+func TestFormulateUniswapPath2(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, feededPricesCh, liquidationCh, priorityliquidationCh)
+	tokens := sync.tokens
+	//pancakeRouter := sync.pancakeRouter
+	pancakeFactory := sync.pancakeFactory
+
+	interSymbols := []string{"vBNB", "vUSDT"}
+	connection := make(map[string]int)
+
+	for _, interSymbol := range interSymbols {
+		for symbol, _ := range tokens {
+			if symbol == interSymbol {
+				continue
+			}
+			pair, _ := pancakeFactory.GetPair(nil, tokens[interSymbol].UnderlyingAddress, tokens[symbol].UnderlyingAddress)
+			if pair.String() != "0x0000000000000000000000000000000000000000" {
+				connection[interSymbol]++
+			} else {
+				fmt.Printf("missed %v%v path\n", interSymbol, symbol)
+			}
+		}
+
+	}
+
+	for _, interSymbol := range interSymbols {
+		fmt.Printf("%v's connection %v\n", interSymbol, connection[interSymbol])
+	}
+
+}
+
+func TestFormulateUniswapPath3(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, feededPricesCh, liquidationCh, priorityliquidationCh)
+	tokens := sync.tokens
+	//pancakeRouter := sync.pancakeRouter
+	pancakeFactory := sync.pancakeFactory
+
+	interSymbols := []string{"vCAN"}
+	connection := make(map[string]int)
+
+	for _, interSymbol := range interSymbols {
+		for symbol, _ := range tokens {
+			if symbol == interSymbol {
+				continue
+			}
+			pair, _ := pancakeFactory.GetPair(nil, tokens[interSymbol].UnderlyingAddress, tokens[symbol].UnderlyingAddress)
+			if pair.String() != "0x0000000000000000000000000000000000000000" {
+				connection[interSymbol]++
+			} else {
+				fmt.Printf("missed %v%v path\n", interSymbol, symbol)
+			}
+		}
+
+	}
+
+	for _, interSymbol := range interSymbols {
+		fmt.Printf("%v's connection %v\n", interSymbol, connection[interSymbol])
+	}
+
+}
+
+func TestFormulateUniswapPath4(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, feededPricesCh, liquidationCh, priorityliquidationCh)
+	tokens := sync.tokens
+	pancakeRouter := sync.pancakeRouter
+	//pancakeFactory := sync.pancakeFactory
+
+	tmpPaths := make([]common.Address, 3)
+	tmpPaths[0] = tokens["vSXP"].UnderlyingAddress
+	tmpPaths[1] = tokens["vBNB"].UnderlyingAddress
+	tmpPaths[2] = tokens["vTRX"].UnderlyingAddress
+	amountOut := big.NewInt(10000000000000000)
+	amountsIn, err := pancakeRouter.GetAmountsIn(nil, amountOut, tmpPaths)
+	require.NoError(t, err)
+	t.Logf("amountsIn%v", amountsIn)
+
+	//for _, interSymbol := range interSymbols {
+	//	for symbol, _ := range tokens {
+	//		if symbol == interSymbol {
+	//			continue
+	//		}
+	//
+	//		pair, _ := pancakeFactory.GetPair(nil, tokens[interSymbol].UnderlyingAddress, tokens[symbol].UnderlyingAddress)
+	//		if pair.String() != "0x0000000000000000000000000000000000000000" {
+	//			connection[interSymbol]++
+	//		} else {
+	//			fmt.Printf("missed %v%v path\n", interSymbol, symbol)
+	//		}
+	//	}
+	//
+	//}
+	//
+	//for _, interSymbol := range interSymbols {
+	//	fmt.Printf("%v's connection %v\n", interSymbol, connection[interSymbol])
+	//}
+
+}
+
+func TestFormulateUniswapPath(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, feededPricesCh, liquidationCh, priorityliquidationCh)
+
+	//pancakeRouter := sync.pancakeRouter
+	pancakeFactory := sync.pancakeFactory
+
+	tokens := sync.tokens
+	//hash := crypto.Keccak256Hash
+	paths := make(map[string][]common.Address)
+	flashLoanMarkets := make(map[string]common.Address)
+
+	//interSymbols := []string{"vBNB", "vUSDT"}
+
+	for srcSymbol, srcToken := range tokens {
+		srcBep20, err := venus.NewBep20(tokens[srcSymbol].UnderlyingAddress, sync.c)
+		require.NoError(t, err)
+
+		maxSrcAmount := big.NewInt(0)
+		maxSrcMaret := common.Address{}
+
+		for dstSymbol, dstToken := range tokens {
+			if srcSymbol == dstSymbol {
+				continue
+			}
+
+			//fmt.Printf("srcSymbol:%v, dstSymol:%v\n", srcSymbol, dstSymbol)
+			pair, err := pancakeFactory.GetPair(nil, srcToken.UnderlyingAddress, dstToken.UnderlyingAddress)
+			if err != nil || pair.String() == "0x0000000000000000000000000000000000000000" {
+				//amountOut := big.NewInt(1000000000000000000)
+				tmpPaths := make([]common.Address, 3)
+				tmpPaths[0] = srcToken.UnderlyingAddress
+				tmpPaths[1] = tokens["vBNB"].UnderlyingAddress
+				tmpPaths[2] = dstToken.UnderlyingAddress
+				paths[srcSymbol+dstSymbol] = tmpPaths
+				fmt.Printf("%v%v%v: paths:%v\n", srcSymbol, "vBNB", dstSymbol, paths)
+
+				//minAmountIn := big.NewInt(big.MaxPrec)
+				//selectedInterSymbol := ""
+				//
+				//for _, interSymbol := range interSymbols {
+				//	fmt.Printf("srcSymbol %v, dstSymbol:%v, iterSymbol:%v, srcAddress:%v, iterAddress:%v\n", srcSymbol, dstSymbol, interSymbol, srcToken.UnderlyingAddress, tokens[interSymbol].UnderlyingAddress)
+				//	_, err := pancakeFactory.GetPair(nil, srcToken.UnderlyingAddress, tokens[interSymbol].UnderlyingAddress)
+				//	if err != nil || pair.String() == "0x0000000000000000000000000000000000000000" {
+				//		continue
+				//	}
+				//
+				//	tmpPaths[1] = tokens[interSymbol].UnderlyingAddress
+				//	amountsIn, err := pancakeRouter.GetAmountsIn(nil, amountOut, tmpPaths)
+				//	if err != nil {
+				//		fmt.Printf("getAmountsIn, %v%v:path:%v\n", srcSymbol, dstSymbol, paths)
+				//		continue
+				//	}
+				//
+				//	if amountsIn[0].Cmp(minAmountIn) == -1 {
+				//		minAmountIn = amountsIn[0]
+				//		selectedInterSymbol = interSymbol
+				//	}
+				//}
+				//
+				//if selectedInterSymbol != "" {
+				//	paths[srcSymbol+dstSymbol] = tmpPaths
+				//	fmt.Printf("%v%v%v: paths:%v\n", srcSymbol, selectedInterSymbol, dstSymbol, paths)
+				//}
+
+			} else {
+				//select the deepest market as flashloan from
+				srcAmout, err := srcBep20.BalanceOf(nil, pair)
+				if err != nil {
+					srcAmout = big.NewInt(0)
+				}
+				if srcAmout.Cmp(maxSrcAmount) == 1 {
+					maxSrcAmount = srcAmout
+					maxSrcMaret = pair
+				}
+
+				//formulate the path
+				tmpPaths := make([]common.Address, 2)
+				tmpPaths[0] = tokens[srcSymbol].UnderlyingAddress
+				tmpPaths[1] = tokens[dstSymbol].UnderlyingAddress
+				paths[srcSymbol+dstSymbol] = tmpPaths
+			}
+			//fmt.Printf("paths[%v%v]= %v\n", srcSymbol, dstSymbol, paths[srcSymbol+dstSymbol])
+		}
+		flashLoanMarkets[srcSymbol] = maxSrcMaret
+		//fmt.Printf("flashLoanMarket[%v] = %v\n", srcSymbol, flashLoanMarkets[srcSymbol])
+	}
+
+	for srcSymbol, _ := range tokens {
+		for dstSymbol, _ := range tokens {
+			fmt.Printf("%v\n", srcSymbol)
+			fmt.Printf("flashLoanMarket[%v] = %v\n", srcSymbol, flashLoanMarkets[srcSymbol])
+			fmt.Printf("paths[%v%v]= %v\n", srcSymbol, dstSymbol, paths[srcSymbol+dstSymbol])
+		}
+	}
+
+}
 func TestFilterAllCotractsBorrowEvent(t *testing.T) {
 	ctx := context.Background()
 	cfg, err := config.New("../config.yml")
