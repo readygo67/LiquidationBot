@@ -1034,7 +1034,7 @@ func TestCalculateSeizedTokenGetAmountsOutWithMulOverFlow(t *testing.T) {
 	}
 }
 
-func TestCalculateSeizedTokenGetAmountsOutWithMulOverFlow1(t *testing.T) {
+func TestCalculateSeizedTokenGetAmountsInExecutionRevert(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
@@ -1050,7 +1050,7 @@ func TestCalculateSeizedTokenGetAmountsOutWithMulOverFlow1(t *testing.T) {
 
 	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, feededPricesCh, liquidationCh, priorityliquidationCh)
 	liquidation := Liquidation{
-		Address: common.HexToAddress("0x0e0c57ae65739394b405bc3afc5003be9f858fdb"),
+		Address: common.HexToAddress("ba3b9a3ecf19e1139c78c4718d45fb99f7a838cd"),
 	}
 
 	err = sync.calculateSeizedTokenAmount(&liquidation)

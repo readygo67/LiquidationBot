@@ -1049,6 +1049,8 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			repayIndex = i
 		}
 	}
+	//TODO(keep), if user only mint VAI, special handling
+
 	//the closeFactor applies to only single borrowed asset
 	maxRepayValue := maxLoanValue.Mul(closeFactor).Div(EXPSACLE)
 	repaySymbol := maxLoanSymbol
@@ -1090,6 +1092,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 	ratio := seizedUnderlyingTokenValue.Div(repayValue)
 	if ratio.Cmp(decimal.NewFromFloat32(1.11)) == 1 || ratio.Cmp(decimal.NewFromFloat32(1.09)) == -1 {
+		fmt.Printf("calculated seizedUnerlyingTokenValue != 1.1, calculateRatio:%v\n", ratio)
 		err := fmt.Errorf("calculated seizedUnerlyingTokenValue != 1.1, calculateRatio:%v\n", ratio)
 		return err
 	}
@@ -1143,7 +1146,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 		amountIns, err := pancakeRouter.GetAmountsIn(callOptions, flashLoanReturnAmount.BigInt(), paths)
 		if err != nil {
-			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAmountsIn, account:%V, paths:%v, err:%v\n", account, paths, err)
+			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAmountsIn, account:%V, paths:%v, amountout:%v, err:%v\n", account, paths, flashLoanReturnAmount, err)
 			return err
 		}
 		fmt.Printf("calculate amounts for flashLoanReturnAmount result, paths:%+v, swap %v%v for %v%v\n", paths, amountIns[0], strings.TrimPrefix(seizedSymbol, "v"), flashLoanFeeAmount.Truncate(0), strings.TrimPrefix(repaySymbol, "v"))
