@@ -156,6 +156,272 @@ func TestSyncMarketsAndPrices(t *testing.T) {
 	verifyTokens(t, sync)
 }
 
+func TestFormulateUniswapPath1(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, feededPricesCh, liquidationCh, priorityliquidationCh)
+	tokens := sync.tokens
+	//pancakeRouter := sync.pancakeRouter
+	pancakeFactory := sync.pancakeFactory
+
+	pair, err := pancakeFactory.GetPair(nil, tokens["vLTC"].UnderlyingAddress, tokens["vXVS"].UnderlyingAddress)
+	require.NoError(t, err)
+	fmt.Printf("pair:%v\n", pair)
+	pair, err = pancakeFactory.GetPair(nil, tokens["vLTC"].UnderlyingAddress, tokens["vBNB"].UnderlyingAddress)
+	require.NoError(t, err)
+	fmt.Printf("vLTCvBNB pair:%v\n", pair)
+	pair, err = pancakeFactory.GetPair(nil, tokens["vLTC"].UnderlyingAddress, tokens["vUSDT"].UnderlyingAddress)
+	require.NoError(t, err)
+	fmt.Printf("vLTCvUSDT pair:%v\n", pair)
+	pair, err = pancakeFactory.GetPair(nil, tokens["vLTC"].UnderlyingAddress, tokens["vDAI"].UnderlyingAddress)
+	require.NoError(t, err)
+	fmt.Printf("vLTCvDAI pair:%v\n", pair)
+	pair, err = pancakeFactory.GetPair(nil, tokens["vLTC"].UnderlyingAddress, tokens["vUSDC"].UnderlyingAddress)
+	require.NoError(t, err)
+	fmt.Printf("vLTCvUSDC pair:%v\n", pair)
+	pair, err = pancakeFactory.GetPair(nil, tokens["vLTC"].UnderlyingAddress, tokens["vTUSD"].UnderlyingAddress)
+	require.NoError(t, err)
+	fmt.Printf("vLTCvTUSD pair:%v\n", pair)
+}
+
+func TestFormulateUniswapPath2(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, feededPricesCh, liquidationCh, priorityliquidationCh)
+	tokens := sync.tokens
+	//pancakeRouter := sync.pancakeRouter
+	pancakeFactory := sync.pancakeFactory
+
+	interSymbols := []string{"vBNB", "vUSDT"}
+	connection := make(map[string]int)
+
+	for _, interSymbol := range interSymbols {
+		for symbol, _ := range tokens {
+			if symbol == interSymbol {
+				continue
+			}
+			pair, _ := pancakeFactory.GetPair(nil, tokens[interSymbol].UnderlyingAddress, tokens[symbol].UnderlyingAddress)
+			if pair.String() != "0x0000000000000000000000000000000000000000" {
+				connection[interSymbol]++
+			} else {
+				fmt.Printf("missed %v%v path\n", interSymbol, symbol)
+			}
+		}
+
+	}
+
+	for _, interSymbol := range interSymbols {
+		fmt.Printf("%v's connection %v\n", interSymbol, connection[interSymbol])
+	}
+
+}
+
+func TestFormulateUniswapPath3(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, feededPricesCh, liquidationCh, priorityliquidationCh)
+	tokens := sync.tokens
+	//pancakeRouter := sync.pancakeRouter
+	pancakeFactory := sync.pancakeFactory
+
+	interSymbols := []string{"vCAN"}
+	connection := make(map[string]int)
+
+	for _, interSymbol := range interSymbols {
+		for symbol, _ := range tokens {
+			if symbol == interSymbol {
+				continue
+			}
+			pair, _ := pancakeFactory.GetPair(nil, tokens[interSymbol].UnderlyingAddress, tokens[symbol].UnderlyingAddress)
+			if pair.String() != "0x0000000000000000000000000000000000000000" {
+				connection[interSymbol]++
+			} else {
+				fmt.Printf("missed %v%v path\n", interSymbol, symbol)
+			}
+		}
+
+	}
+
+	for _, interSymbol := range interSymbols {
+		fmt.Printf("%v's connection %v\n", interSymbol, connection[interSymbol])
+	}
+
+}
+
+func TestFormulateUniswapPath4(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, feededPricesCh, liquidationCh, priorityliquidationCh)
+	tokens := sync.tokens
+	pancakeRouter := sync.pancakeRouter
+	//pancakeFactory := sync.pancakeFactory
+
+	tmpPaths := make([]common.Address, 3)
+	tmpPaths[0] = tokens["vSXP"].UnderlyingAddress
+	tmpPaths[1] = tokens["vBNB"].UnderlyingAddress
+	tmpPaths[2] = tokens["vTRX"].UnderlyingAddress
+	amountOut := big.NewInt(10000000000000000)
+	amountsIn, err := pancakeRouter.GetAmountsIn(nil, amountOut, tmpPaths)
+	require.NoError(t, err)
+	t.Logf("amountsIn%v", amountsIn)
+
+	//for _, interSymbol := range interSymbols {
+	//	for symbol, _ := range tokens {
+	//		if symbol == interSymbol {
+	//			continue
+	//		}
+	//
+	//		pair, _ := pancakeFactory.GetPair(nil, tokens[interSymbol].UnderlyingAddress, tokens[symbol].UnderlyingAddress)
+	//		if pair.String() != "0x0000000000000000000000000000000000000000" {
+	//			connection[interSymbol]++
+	//		} else {
+	//			fmt.Printf("missed %v%v path\n", interSymbol, symbol)
+	//		}
+	//	}
+	//
+	//}
+	//
+	//for _, interSymbol := range interSymbols {
+	//	fmt.Printf("%v's connection %v\n", interSymbol, connection[interSymbol])
+	//}
+
+}
+
+func TestFormulateUniswapPath(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, feededPricesCh, liquidationCh, priorityliquidationCh)
+
+	//pancakeRouter := sync.pancakeRouter
+	pancakeFactory := sync.pancakeFactory
+
+	tokens := sync.tokens
+	paths := make(map[string][]common.Address)
+	flashLoanMarkets := make(map[string]common.Address)
+
+	for srcSymbol, srcToken := range tokens {
+		//srcBep20, err := venus.NewBep20(tokens[srcSymbol].UnderlyingAddress, sync.c)
+		//require.NoError(t, err)
+		//
+		//maxSrcAmount := big.NewInt(0)
+		//maxSrcMaret := common.Address{}
+
+		for dstSymbol, dstToken := range tokens {
+			if srcSymbol == dstSymbol {
+				continue
+			}
+
+			pair, err := pancakeFactory.GetPair(nil, srcToken.UnderlyingAddress, dstToken.UnderlyingAddress)
+			if err != nil || pair.String() == "0x0000000000000000000000000000000000000000" {
+				tmpPaths := make([]common.Address, 3)
+				tmpPaths[0] = srcToken.UnderlyingAddress
+				tmpPaths[1] = tokens["vBNB"].UnderlyingAddress
+				tmpPaths[2] = dstToken.UnderlyingAddress
+				paths[srcSymbol+dstSymbol] = tmpPaths
+			} else {
+				////select the deepest market as flashloan from
+				//srcAmout, err := srcBep20.BalanceOf(nil, pair)
+				//if err != nil {
+				//	srcAmout = big.NewInt(0)
+				//}
+				//if srcAmout.Cmp(maxSrcAmount) == 1 {
+				//	maxSrcAmount = srcAmout
+				//	maxSrcMaret = pair
+				//}
+
+				//formulate the path
+				tmpPaths := make([]common.Address, 2)
+				tmpPaths[0] = tokens[srcSymbol].UnderlyingAddress
+				tmpPaths[1] = tokens[dstSymbol].UnderlyingAddress
+				paths[srcSymbol+dstSymbol] = tmpPaths
+			}
+			//fmt.Printf("paths[%v%v]= %v\n", srcSymbol, dstSymbol, paths[srcSymbol+dstSymbol])
+		}
+		var pair common.Address
+		if srcSymbol != "vBNB" {
+			pair, err = pancakeFactory.GetPair(nil, srcToken.UnderlyingAddress, tokens["vBNB"].UnderlyingAddress)
+			require.NoError(t, err)
+		} else {
+			pair, err = pancakeFactory.GetPair(nil, srcToken.UnderlyingAddress, tokens["vUSDT"].UnderlyingAddress)
+			require.NoError(t, err)
+		}
+		flashLoanMarkets[srcSymbol] = pair
+
+	}
+
+	count := 0
+	for srcSymbol, _ := range tokens {
+		fmt.Printf("flashLoanMarket[%v] = %v\n", srcSymbol, flashLoanMarkets[srcSymbol])
+		count++
+	}
+	fmt.Printf("count:%v\n", count)
+
+	count = 0
+	for srcSymbol, _ := range tokens {
+		fmt.Printf("flashLoanMarket[%v] = %v\n", srcSymbol, flashLoanMarkets[srcSymbol])
+		for dstSymbol, _ := range tokens {
+			fmt.Printf("paths[%v%v]= %v\n", srcSymbol, dstSymbol, paths[srcSymbol+dstSymbol])
+			count++
+		}
+	}
+	fmt.Printf("count:%v\n", count)
+
+}
 func TestFilterAllCotractsBorrowEvent(t *testing.T) {
 	ctx := context.Background()
 	cfg, err := config.New("../config.yml")
@@ -724,7 +990,7 @@ func TestSyncOneAccount1(t *testing.T) {
 //	require.Equal(t, 1, len(gotAccounts))
 //}
 
-func TestSyncOneAccountWithIncreaseAccountNumer(t *testing.T) {
+func TestSyncOneAccountWithIncreaseAccountNumber(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
