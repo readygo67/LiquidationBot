@@ -1207,7 +1207,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 				fmt.Printf("calculateSeizedTokenAmount case5, fail to get GetAmountsIn, account:%V, paths:%v, amountout:%v, err:%v\n", account, paths1, flashLoanReturnAmount, err)
 				return err
 			}
-			fmt.Printf("calculateSeizedTokenAmount case5, account:%v, paths:%+v, swap %v%v for %v%v\n", paths1, amountIns[0], strings.TrimPrefix(seizedSymbol, "v"), flashLoanFeeAmount.Truncate(0), strings.TrimPrefix(repaySymbol, "v"))
+			fmt.Printf("calculateSeizedTokenAmount case5, account:%v, paths:%+v, swap %v%v for %v%v\n", account, paths1, amountIns[0], strings.TrimPrefix(seizedSymbol, "v"), flashLoanFeeAmount.Truncate(0), strings.TrimPrefix(repaySymbol, "v"))
 
 			// swap the remains to usdt
 			remain := seizedUnderlyingTokenAmount.Truncate(0).Sub(decimal.NewFromBigInt(amountIns[0], 0))
