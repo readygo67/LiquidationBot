@@ -973,7 +973,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 	bigMintedVAIS, err := comptroller.MintedVAIs(nil, account)
 	if err != nil {
-		fmt.Printf("calculateSeizedTokenAmount, fail to get MintedVAIs, err:%v\n", err)
+		fmt.Printf("calculateSeizedTokenAmount, fail to get MintedVAIs, account:%v, err:%v\n", account, err)
 		return err
 	}
 	mintedVAIS := decimal.NewFromBigInt(bigMintedVAIS, 0)
@@ -1096,10 +1096,10 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 		flashLoanFrom, err = pancakeFactory.GetPair(nil, tokens[repaySymbol].UnderlyingAddress, tokens["vUSDT"].UnderlyingAddress)
 	}
 	if err != nil {
-		fmt.Printf("calculateSeizedTokenAmount, fail to get %vvBNB pair, account:%v, err:%v\n", repaySymbol, account, err)
+		fmt.Printf("calculateSeizedTokenAmount, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
 		return err
 	}
-	fmt.Printf("height%v, account:%v,repaySmbol:%v, flashLoanFrom:%v, repayAddress:%v repayValue:%v, repayAmount:%v seizedSymbol:%v, seizedAddress:%v, seizedCTokenAmount:%v, seizedUnderlyingTokenAmount:%v, seizedUnderlyingTokenValue:%v\n", currentHeight, account, repaySymbol, flashLoanFrom, tokens[repaySymbol].Address, repayValue, repayAmount, seizedSymbol, tokens[seizedSymbol].Address, seizedCTokenAmount, seizedUnderlyingTokenAmount, seizedUnderlyingTokenValue)
+	fmt.Printf("height%v, account:%v, repaySmbol:%v, flashLoanFrom:%v, repayAddress:%v, repayValue:%v, repayAmount:%v seizedSymbol:%v, seizedAddress:%v, seizedCTokenAmount:%v, seizedUnderlyingTokenAmount:%v, seizedUnderlyingTokenValue:%v\n", currentHeight, account, repaySymbol, flashLoanFrom, tokens[repaySymbol].Address, repayValue, repayAmount, seizedSymbol, tokens[seizedSymbol].Address, seizedCTokenAmount, seizedUnderlyingTokenAmount, seizedUnderlyingTokenValue)
 
 	ratio := seizedUnderlyingTokenValue.Div(repayValue)
 	if ratio.Cmp(decimal.NewFromFloat32(1.11)) == 1 || ratio.Cmp(decimal.NewFromFloat32(1.09)) == -1 {
@@ -1150,9 +1150,8 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			fmt.Printf("calculateSeizedTokenAmount case2: seizedSymbol == repaySymbol and symbol is not stable coin, account:%v, symbol:%v, seizedAmount:%v, returnAmout:%v, usdtAmount:%v, gasFee:%v, profit:%v\n", account, seizedSymbol, seizedUnderlyingTokenAmount, flashLoanReturnAmount, usdtAmount, gasFee, profit.Div(EXPSACLE))
 
 			if profit.Cmp(decimal.Zero) == 1 {
-				fmt.Printf("case2, swap needed, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
+				fmt.Printf("case2, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
 			}
-
 		}
 		return nil
 	}
@@ -1175,9 +1174,8 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 		fmt.Printf("calculateSeizedTokenAmount case3: seizedSymbol != repaySymbol and seizedSymbol stable coin, account:%v, symbol:%v, seizedAmount:%v, returnAmout:%v, remain:%v, gasFee:%v, profit:%v\n", account, seizedSymbol, seizedUnderlyingTokenAmount, amountsIn[0], remain, gasFee, profit.Div(EXPSACLE))
 
 		if profit.Cmp(decimal.Zero) == 1 {
-			fmt.Printf("case3, swap needed, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
+			fmt.Printf("case3, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
 		}
-
 	} else {
 		if isStalbeCoin(repaySymbol) {
 			//case4, collateral(i.e. seizedSymbol) is not stable coin, repaySymbol is a stable coin, sell all seizedSymbol to repaySymbol
@@ -1197,7 +1195,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			fmt.Printf("calculateSeizedTokenAmount case4: seizedSymbol is not stable coin, repaySymbol is stable coin, account:%v repaysymbol:%v, seizedsymbol:%v seizedAmount:%v, amountsOut:%v returnAmout:%v, remain:%v, gasFee:%v, profit:%v\n", account, repaySymbol, seizedSymbol, seizedUnderlyingTokenAmount, amountsOut[len(amountsOut)-1], flashLoanReturnAmount, remain, gasFee, profit.Div(EXPSACLE))
 
 			if profit.Cmp(decimal.Zero) == 1 {
-				fmt.Printf("case4, swap needed, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
+				fmt.Printf("case4, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
 			}
 		} else {
 			//case5,  collateral(i.e. seizedSymbol) and repaySymbol are not stable coin. sell partly seizedSymbol to repay symbol, sell remain to usdt
