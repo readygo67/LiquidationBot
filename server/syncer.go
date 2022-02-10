@@ -1171,7 +1171,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 		remain := seizedUnderlyingTokenAmount.Sub(decimal.NewFromBigInt(amountsIn[0], 0))
 		profit := remain.Mul(tokens[seizedSymbol].Price).Div(EXPSACLE).Sub(gasFee)
-		fmt.Printf("calculateSeizedTokenAmount case3: seizedSymbol != repaySymbol and seizedSymbol stable coin, account:%v, symbol:%v, seizedAmount:%v, returnAmout:%v, remain:%v, gasFee:%v, profit:%v\n", account, seizedSymbol, seizedUnderlyingTokenAmount, amountsIn[0], remain, gasFee, profit.Div(EXPSACLE))
+		fmt.Printf("calculateSeizedTokenAmount case3: seizedSymbol != repaySymbol and seizedSymbol stable coin, account:%v, seizedsymbol:%v, seizedAmount:%v, repaySymbol:%v, returnAmout:%v, remain:%v, gasFee:%v, profit:%v\n", account, seizedSymbol, seizedUnderlyingTokenAmount, repaySymbol, amountsIn[0], remain, gasFee, profit.Div(EXPSACLE))
 
 		if profit.Cmp(decimal.Zero) == 1 {
 			fmt.Printf("case3, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
@@ -1207,7 +1207,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 				fmt.Printf("calculateSeizedTokenAmount case5, fail to get GetAmountsIn, account:%V, paths:%v, amountout:%v, err:%v\n", account, paths1, flashLoanReturnAmount, err)
 				return err
 			}
-			fmt.Printf("calculateSeizedTokenAmount case5, account:%v, paths:%+v, swap %v%v for %v%v\n", paths1, amountIns[0], strings.TrimPrefix(seizedSymbol, "v"), flashLoanFeeAmount.Truncate(0), strings.TrimPrefix(repaySymbol, "v"))
+			fmt.Printf("calculateSeizedTokenAmount case5, account:%v, paths:%+v, swap %v%v for %v%v\n", account, paths1, amountIns[0], strings.TrimPrefix(seizedSymbol, "v"), flashLoanFeeAmount.Truncate(0), strings.TrimPrefix(repaySymbol, "v"))
 
 			// swap the remains to usdt
 			remain := seizedUnderlyingTokenAmount.Truncate(0).Sub(decimal.NewFromBigInt(amountIns[0], 0))
@@ -1221,7 +1221,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			usdtAmount := decimal.NewFromBigInt(amountsOut[len(amountsOut)-1], 0)
 			profit := usdtAmount.Mul(tokens["vUSDT"].Price).Div(EXPSACLE).Sub(gasFee)
 
-			fmt.Printf("calculateSeizedTokenAmount case5, account:%v, path:%v, swap %v%v for %vUSDT, profit:%v\n", paths2, remain, strings.TrimPrefix(seizedSymbol, "v"), amountsOut[len(amountsOut)-1], profit.Div(EXPSACLE))
+			fmt.Printf("calculateSeizedTokenAmount case5, account:%v, path:%v, swap %v%v for %vUSDT, profit:%v\n", account, paths2, remain, strings.TrimPrefix(seizedSymbol, "v"), amountsOut[len(amountsOut)-1], profit.Div(EXPSACLE))
 			if profit.Cmp(decimal.Zero) == 1 {
 				fmt.Printf("case5: profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
 			}
