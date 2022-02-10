@@ -11,6 +11,7 @@ type Config struct {
 	Oracle        string `yaml:"oracle"`
 	Comptroller   string `yaml:"comptroller"`
 	PancakeRouter string `yaml:"pancake_router"`
+	Liquidator    string `yaml:"liquidator"`
 	DB            string `yaml:"db"`
 	StartHeihgt   uint64 `yaml:"start_heihgt"`
 	Override      bool   `yaml:"override"`

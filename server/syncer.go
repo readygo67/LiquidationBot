@@ -99,21 +99,20 @@ type Syncer struct {
 	c  *ethclient.Client
 	db *leveldb.DB
 
-	oracle              *venus.Oracle
-	comptroller         *venus.Comptroller
-	pancakeRouter       *venus.IPancakeRouter02
-	pancakeFactory      *venus.IPancakeFactory
-	closeFactor         decimal.Decimal
-	symbols             map[common.Address]string
-	tokens              map[string]*TokenInfo
-	vbep20s             map[common.Address]*venus.Vbep20
-	syncDone            bool
-	m                   sync.Mutex
-	wg                  sync.WaitGroup
-	quitCh              chan struct{}
-	forceUpdatePricesCh chan struct{}
-	feededPricesCh      chan *FeededPrices
-
+	oracle               *venus.Oracle
+	comptroller          *venus.Comptroller
+	pancakeRouter        *venus.IPancakeRouter02
+	pancakeFactory       *venus.IPancakeFactory
+	closeFactor          decimal.Decimal
+	symbols              map[common.Address]string
+	tokens               map[string]*TokenInfo
+	vbep20s              map[common.Address]*venus.Vbep20
+	liquidator           *venus.ILiquidate
+	m                    sync.Mutex
+	wg                   sync.WaitGroup
+	quitCh               chan struct{}
+	forceUpdatePricesCh  chan struct{}
+	feededPricesCh       chan *FeededPrices
 	liquidationCh        chan *Liquidation
 	priortyLiquidationCh chan *Liquidation
 }
@@ -136,6 +135,7 @@ func NewSyncer(
 	comptrollerAddress string,
 	oracleAddress string,
 	pancakeRouterAddress string,
+	liquidatorAddress string,
 	feededPricesCh chan *FeededPrices,
 	liquidationCh chan *Liquidation,
 	priorityLiquationCh chan *Liquidation) *Syncer {
@@ -172,6 +172,11 @@ func NewSyncer(
 	}
 
 	pancakeFactory, err := venus.NewIPancakeFactory(factoryAddress, c)
+	if err != nil {
+		panic(err)
+	}
+
+	liquidator, err := venus.NewILiquidate(common.HexToAddress(liquidatorAddress), c)
 	if err != nil {
 		panic(err)
 	}
@@ -264,6 +269,7 @@ func NewSyncer(
 		tokens:               tokens,
 		symbols:              symbols,
 		vbep20s:              vbep20s,
+		liquidator:           liquidator,
 		m:                    m,
 		quitCh:               make(chan struct{}),
 		forceUpdatePricesCh:  make(chan struct{}),

@@ -3,6 +3,7 @@ network: mainnet
 comptroller : "0xfD36E2c2a6789Db23113685031d7F16329158384"
 oracle: "0x516c18DC440f107f12619a6d2cc320622807d0eE"
 pancake_router: "0x10ED43C718714eb63d5aA57B78B54704E256024E"
+liquidator: ""
 db: maindb
 start_heihgt: 13000000
 override: false
