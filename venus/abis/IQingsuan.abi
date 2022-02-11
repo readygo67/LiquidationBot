@@ -1,0 +1,35 @@
+[
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "situation",
+				"type": "uint256"
+			},
+			{
+				"internalType": "address",
+				"name": "ch",
+				"type": "address"
+			},
+			{
+				"internalType": "address[]",
+				"name": "sellPath",
+				"type": "address[]"
+			},
+			{
+				"internalType": "address[]",
+				"name": "tokens",
+				"type": "address[]"
+			},
+			{
+				"internalType": "uint256",
+				"name": "_flashLoanAmount",
+				"type": "uint256"
+			}
+		],
+		"name": "qingsuan",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	}
+]

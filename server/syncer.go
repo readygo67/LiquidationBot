@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
 	"github.com/ethereum/go-ethereum"
@@ -9,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/readygo67/LiquidationBot/db"
@@ -107,7 +109,8 @@ type Syncer struct {
 	symbols              map[common.Address]string
 	tokens               map[string]*TokenInfo
 	vbep20s              map[common.Address]*venus.Vbep20
-	liquidator           *venus.ILiquidate
+	liquidator           *venus.IQingsuan
+	PrivateKey           *ecdsa.PrivateKey
 	m                    sync.Mutex
 	wg                   sync.WaitGroup
 	quitCh               chan struct{}
@@ -136,6 +139,7 @@ func NewSyncer(
 	oracleAddress string,
 	pancakeRouterAddress string,
 	liquidatorAddress string,
+	privatekey string,
 	feededPricesCh chan *FeededPrices,
 	liquidationCh chan *Liquidation,
 	priorityLiquationCh chan *Liquidation) *Syncer {
@@ -176,11 +180,16 @@ func NewSyncer(
 		panic(err)
 	}
 
-	liquidator, err := venus.NewILiquidate(common.HexToAddress(liquidatorAddress), c)
+	liquidator, err := venus.NewIQingsuan(common.HexToAddress(liquidatorAddress), c)
 	if err != nil {
 		panic(err)
 	}
 
+	privateKey, err := crypto.HexToECDSA(privatekey)
+	if err != nil {
+		panic(err)
+	}
+	
 	markets, err := comptroller.GetAllMarkets(nil)
 	if err != nil {
 		panic(err)
@@ -270,6 +279,7 @@ func NewSyncer(
 		symbols:              symbols,
 		vbep20s:              vbep20s,
 		liquidator:           liquidator,
+		PrivateKey:           privateKey,
 		m:                    m,
 		quitCh:               make(chan struct{}),
 		forceUpdatePricesCh:  make(chan struct{}),
@@ -1137,6 +1147,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			fmt.Printf("calculateSeizedTokenAmount case1: seizedSymbol == repaySymbol and symbol is a stable coin, account:%v, symbol:%v, seizedAmount:%v, returnAmout:%v, gasFee:%v profit:%v\n", account, seizedSymbol, seizedUnderlyingTokenAmount, flashLoanReturnAmount, gasFee, profit.Div(EXPSACLE))
 			if profit.Cmp(decimal.Zero) == 1 {
 				fmt.Printf("case1, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
+
 			}
 		} else {
 			//case2,  seizedSymbol == repaySymbol and symbol is not a stable coin, after return flashloan, sell remain to usdt

@@ -13,4 +13,5 @@ func TestConfig(t *testing.T) {
 	fmt.Printf("comptroller:%+v\n", config.Comptroller)
 	fmt.Printf("override:%v\n", config.Override)
 	fmt.Printf("StartHeight:%v\n", config.StartHeihgt)
+	fmt.Printf("PrivateKey:%v\n", config.PrivateKey)
 }
