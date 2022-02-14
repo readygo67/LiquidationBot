@@ -3,22 +3,27 @@
 		"inputs": [
 			{
 				"internalType": "uint256",
-				"name": "situation",
+				"name": "_situation",
 				"type": "uint256"
 			},
 			{
 				"internalType": "address",
-				"name": "ch",
+				"name": "_flashLoanFrom",
 				"type": "address"
 			},
 			{
 				"internalType": "address[]",
-				"name": "sellPath",
+				"name": "_path1",
 				"type": "address[]"
 			},
 			{
 				"internalType": "address[]",
-				"name": "tokens",
+				"name": "_path2",
+				"type": "address[]"
+			},
+			{
+				"internalType": "address[]",
+				"name": "_tokens",
 				"type": "address[]"
 			},
 			{

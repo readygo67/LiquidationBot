@@ -1219,6 +1219,14 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			}
 		}
 		return nil
+  }
+
+	addresses := []common.Address{
+		tokens[repaySymbol].Address,
+		tokens[seizedSymbol].Address,
+		tokens[seizedSymbol].UnderlyingAddress,
+		tokens[repaySymbol].UnderlyingAddress,
+		account,
 	}
 
 	if seizedSymbol == repaySymbol {
@@ -1231,6 +1239,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			fmt.Printf("calculateSeizedTokenAmount case1: seizedSymbol == repaySymbol and symbol is a stable coin, account:%v, symbol:%v, seizedAmount:%v, returnAmout:%v, gasFee:%v profit:%v\n", account, seizedSymbol, seizedUnderlyingTokenAmount, flashLoanReturnAmount, gasFee, profit.Div(EXPSACLE))
 			if profit.Cmp(decimal.Zero) == 1 {
 				fmt.Printf("case1, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
+				s.doLiquidation(big.NewInt(1), flashLoanFrom, nil, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt())
 
 			}
 		} else {
@@ -1239,10 +1248,10 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			gasFee := gasPrice.Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
 			remain := seizedUnderlyingTokenAmount.Sub(flashLoanReturnAmount)
 
-			paths := s.buildPaths(seizedSymbol, "vUSDT", tokens)
-			amountsOut, err := pancakeRouter.GetAmountsOut(callOptions, remain.Truncate(0).BigInt(), paths)
+			path2 := s.buildPaths(seizedSymbol, "vUSDT", tokens)
+			amountsOut, err := pancakeRouter.GetAmountsOut(callOptions, remain.Truncate(0).BigInt(), path2)
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case2:, fail to get GetAmountsout, account:%v, paths:%v, amountIn:%v, err:%v\n", account, paths, remain.Truncate(0), err)
+				fmt.Printf("calculateSeizedTokenAmount case2:, fail to get GetAmountsout, account:%v, paths:%v, amountIn:%v, err:%v\n", account, path2, remain.Truncate(0), err)
 				return err
 			}
 
@@ -1252,6 +1261,8 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 			if profit.Cmp(decimal.Zero) == 1 {
 				fmt.Printf("case2, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
+				s.doLiquidation(big.NewInt(2), flashLoanFrom, nil, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt())
+
 			}
 		}
 		return nil
@@ -1263,10 +1274,10 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 		gasFee := decimal.NewFromBigInt(bigGasPrice, 0).Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
 
 		//paths := s.uniswapPaths[seizedSymbol+repaySymbol]
-		paths := s.buildPaths(seizedSymbol, repaySymbol, tokens)
-		amountsIn, err := pancakeRouter.GetAmountsIn(callOptions, flashLoanReturnAmount.BigInt(), paths) //amountsIn[0] is the stablecoin needed.
+		path1 := s.buildPaths(seizedSymbol, repaySymbol, tokens)
+		amountsIn, err := pancakeRouter.GetAmountsIn(callOptions, flashLoanReturnAmount.BigInt(), path1) //amountsIn[0] is the stablecoin needed.
 		if err != nil {
-			fmt.Printf("calculateSeizedTokenAmount case3, fail to get GetAmountsIn, account:%v, paths:%v, amountout:%v, err:%v\n", account, paths, flashLoanReturnAmount, err)
+			fmt.Printf("calculateSeizedTokenAmount case3, fail to get GetAmountsIn, account:%v, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
 			return err
 		}
 
@@ -1276,6 +1287,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 		if profit.Cmp(decimal.Zero) == 1 {
 			fmt.Printf("case3, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
+			s.doLiquidation(big.NewInt(3), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt())
 		}
 	} else {
 		if isStalbeCoin(repaySymbol) {
@@ -1284,10 +1296,10 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			gasFee := decimal.NewFromBigInt(bigGasPrice, 0).Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
 
 			//paths := s.uniswapPaths[seizedSymbol+repaySymbol]
-			paths := s.buildPaths(seizedSymbol, repaySymbol, tokens)
-			amountsOut, err := pancakeRouter.GetAmountsOut(callOptions, seizedUnderlyingTokenAmount.Truncate(0).BigInt(), paths)
+			path1 := s.buildPaths(seizedSymbol, repaySymbol, tokens)
+			amountsOut, err := pancakeRouter.GetAmountsOut(callOptions, seizedUnderlyingTokenAmount.Truncate(0).BigInt(), path1)
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case4, fail to get GetAmountsIn, account:%V, paths:%v, amountout:%v, err:%v\n", account, paths, flashLoanReturnAmount, err)
+				fmt.Printf("calculateSeizedTokenAmount case4, fail to get GetAmountsIn, account:%V, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
 				return err
 			}
 
@@ -1297,34 +1309,36 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 			if profit.Cmp(decimal.Zero) == 1 {
 				fmt.Printf("case4, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
+				s.doLiquidation(big.NewInt(4), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt())
 			}
 		} else {
 			//case5,  collateral(i.e. seizedSymbol) and repaySymbol are not stable coin. sell partly seizedSymbol to repay symbol, sell remain to usdt
 			bigGas = decimal.NewFromInt(700000)
 			gasFee := decimal.NewFromBigInt(bigGasPrice, 0).Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
-			paths1 := s.buildPaths(seizedSymbol, repaySymbol, tokens)
-			amountIns, err := pancakeRouter.GetAmountsIn(callOptions, flashLoanReturnAmount.BigInt(), paths1)
+			path1 := s.buildPaths(seizedSymbol, repaySymbol, tokens)
+			amountIns, err := pancakeRouter.GetAmountsIn(callOptions, flashLoanReturnAmount.BigInt(), path1)
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case5, fail to get GetAmountsIn, account:%V, paths:%v, amountout:%v, err:%v\n", account, paths1, flashLoanReturnAmount, err)
+				fmt.Printf("calculateSeizedTokenAmount case5, fail to get GetAmountsIn, account:%V, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
 				return err
 			}
-			fmt.Printf("calculateSeizedTokenAmount case5, account:%v, paths:%+v, swap %v%v for %v%v\n", account, paths1, amountIns[0], strings.TrimPrefix(seizedSymbol, "v"), flashLoanFeeAmount.Truncate(0), strings.TrimPrefix(repaySymbol, "v"))
+			fmt.Printf("calculateSeizedTokenAmount case5, account:%v, paths:%+v, swap %v%v for %v%v\n", account, path1, amountIns[0], strings.TrimPrefix(seizedSymbol, "v"), flashLoanFeeAmount.Truncate(0), strings.TrimPrefix(repaySymbol, "v"))
 
 			// swap the remains to usdt
 			remain := seizedUnderlyingTokenAmount.Truncate(0).Sub(decimal.NewFromBigInt(amountIns[0], 0))
-			paths2 := s.buildPaths(seizedSymbol, "vUSDT", tokens)
-			amountsOut, err := pancakeRouter.GetAmountsOut(callOptions, remain.Truncate(0).BigInt(), paths2)
+			path2 := s.buildPaths(seizedSymbol, "vUSDT", tokens)
+			amountsOut, err := pancakeRouter.GetAmountsOut(callOptions, remain.Truncate(0).BigInt(), path2)
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case5, fail to get GetAmountsOut, account:%v paths:%v, err:%v\n", account, paths2, err)
+				fmt.Printf("calculateSeizedTokenAmount case5, fail to get GetAmountsOut, account:%v paths:%v, err:%v\n", account, path2, err)
 				return err
 			}
 
 			usdtAmount := decimal.NewFromBigInt(amountsOut[len(amountsOut)-1], 0)
 			profit := usdtAmount.Mul(tokens["vUSDT"].Price).Div(EXPSACLE).Sub(gasFee)
 
-			fmt.Printf("calculateSeizedTokenAmount case5, account:%v, path:%v, swap %v%v for %vUSDT, profit:%v\n", account, paths2, remain, strings.TrimPrefix(seizedSymbol, "v"), amountsOut[len(amountsOut)-1], profit.Div(EXPSACLE))
+			fmt.Printf("calculateSeizedTokenAmount case5, account:%v, path:%v, swap %v%v for %vUSDT, profit:%v\n", account, path2, remain, strings.TrimPrefix(seizedSymbol, "v"), amountsOut[len(amountsOut)-1], profit.Div(EXPSACLE))
 			if profit.Cmp(decimal.Zero) == 1 {
 				fmt.Printf("case5: profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
+				s.doLiquidation(big.NewInt(5), flashLoanFrom, path1, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt())
 			}
 		}
 	}
@@ -1465,5 +1479,42 @@ func (s *Syncer) buildVAIPaths(srcSymbol, dstSymbol string, tokens map[string]*T
 		paths[1] = VAIAddress
 		return paths
 	}
+}
+=======
+//situcation： 情况 1-5
+//ch： 借钱用的pair地址
+//sellPath： 卖的时候的path
+//tokens：
+// Tokens array
+// [0] - _flashLoanVToken 要去借的钱（要还给venus的）
+// [1] - _seizedVToken 可以赎回来的钱
+// [2] - _seizedTokenUnderlying 赎回来的钱的underlying
+// [3] - _flashloanTokenUnderlying 借的钱的underlying
+// [4] - target 目标账号
+//_flashLoanAmount ： 借多少？ 还多少？
+
+func (s *Syncer) doLiquidation(scenarioNo *big.Int, flashLoanFrom common.Address, path1 []common.Address, path2 []common.Address, tokens []common.Address, flashLoanAmount *big.Int, gasPrice *big.Int) error {
+
+	publicKey := s.PrivateKey.Public()
+	publicKeyECDSA, _ := publicKey.(*ecdsa.PublicKey)
+
+	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+
+	nonce, err := s.c.PendingNonceAt(context.Background(), fromAddress)
+	if err != nil {
+		return err
+	}
+
+	auth, _ := bind.NewKeyedTransactorWithChainID(s.PrivateKey, big.NewInt(56))
+	auth.Value = big.NewInt(0) // in wei
+
+	auth.Nonce = big.NewInt(int64(nonce))
+	auth.GasPrice = gasPrice
+
+	tx, err := s.liquidator.Qingsuan(auth, scenarioNo, flashLoanFrom, path1, path2, tokens, flashLoanAmount)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("tx:%v\n", tx.Hash())
 	return nil
 }
