@@ -1393,6 +1393,27 @@ func TestCalculateSeizedTokenCase5(t *testing.T) {
 	sync.calculateSeizedTokenAmount(&liquidation)
 }
 
+func TestCalculateSeizedTokenCase7(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
+	liquidation := Liquidation{
+		Address: common.HexToAddress("0x9F7A5885051fB71c4D2a7aB4203446FaCdF65BF7"),
+	}
+	sync.calculateSeizedTokenAmount(&liquidation)
+}
+
 func TestCalculateSeizedToken1(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
