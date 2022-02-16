@@ -11,25 +11,6 @@
 					{
 						"indexed": false,
 						"internalType": "uint256",
-						"name": "seizedUnderlyingAmount",
-						"type": "uint256"
-					},
-					{
-						"indexed": false,
-						"internalType": "uint256",
-						"name": "massProfit",
-						"type": "uint256"
-					}
-				],
-				"name": "Profit",
-				"type": "event"
-			},
-			{
-				"anonymous": false,
-				"inputs": [
-					{
-						"indexed": false,
-						"internalType": "uint256",
 						"name": "scenarioNo",
 						"type": "uint256"
 					},
@@ -192,11 +173,11 @@
 			]
 		},
 		"LiquidationBot/contracts/liquidator.sol": {
-			"keccak256": "0x5f0768dfff609052c29a2ce45d9f2f38a10418ae54552888e2010d5d7013ccc4",
+			"keccak256": "0xe8ce02012729fc3a9893226cf3c186e5cb8197d06a449db17aaa1ddd675a630a",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://481b432479c410669abe7901029cab3ca0d5b32a6a87fbaacc9f97d421593ca6",
-				"dweb:/ipfs/QmYfNGPUoRuhmnPgbGzV8rjGvmQqBaMCU7WRFmx5pPbw58"
+				"bzz-raw://ff68e6e1970989efcb105e389eec78dca39191992c900b0044fc27d579f351f9",
+				"dweb:/ipfs/QmNx3mWjrvmuw8yfLdSbrZAqB54mLjLDWgW3snjETtF4dD"
 			]
 		}
 	},

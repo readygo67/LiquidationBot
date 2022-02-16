@@ -15,7 +15,6 @@ contract UniFlashSwap is IPancakeCallee {
     address private constant vDAI = 0x334b3eCB4DCa3593BCCC3c7EBD1A1C1d1780FBF1;
 
     event Scenario(uint scenarioNo, address repayUnderlyingToken, uint repayAmount, address seizedUnderlyingToken, uint flashLoanReturnAmount,uint seizedUnderlyingAmount, uint massProfit);
-    event Profit(uint seizedUnderlyingAmount, uint massProfit);
 
     struct LocalVars {
         uint situation;
@@ -441,30 +440,5 @@ contract UniFlashSwap is IPancakeCallee {
         return (_token == vBUSD || _token == vUSDT || _token == vDAI);
     }
 
-
-    // function case6(VTokenInterface repayVToken, VTokenInterface seizedVToken, IERC20 seizedUnderlyingToken, address[] memory path1, uint repayAmount, uint flashLoanReturnAmount, address borrower) internal{
-    //     uint[2] memory result;
-    //     uint[2] memory beforeAfterAmount;
-    //     uint[] memory amounts;
-    
-    //     vars.beforeSeizedUnderlyingAmount = seizedVToken.balanceOf(address(this));
-    //     (result[0], result[1]) = IVAI(address(repayVToken)).liquidateVAI(borrower, repayAmount, seizedVToken);
-    //     require(result[0] == 0,"6-liquidateBorrow error "); //repay VAI, get vUSDT
-    //     vars.afterSeizedUnderlyingAmount = seizedVToken.balanceOf(address(this));
-    //     uint vars.seizedVTokenAmount = vars.afterSeizedVTokenAmount - vars.beforeSeizedVTokenAmount;
-    //     require(vars.seizedVTokenAmount > 0,"5.3-seized vtoken amount is zero");
-
-    //     vars.beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
-    //     require(seizedVToken.redeem(vars.seizedVTokenAmount) == 0,"6-redeem error");   //redeem vUSDT to USDT
-    //     vars.afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
-    //     uint vars.seizedUnderlyingAmount = vars.afterSeizedUnderlyingAmount - vars.beforeSeizedUnderlyingAmount;
-
-    //     // change part of USDT to flashLoanReturnAmount wVAI for returning flashloan later\
-    //     uint changeAmount = flashLoanReturnAmount + result[1] - vars.repayAmount;
-    //     amounts = chainSwapExactOut(changeAmount, vars.path1, address(this));
-    //     require(vars.seizedUnderlyingAmount > amounts[0], "6-bnb-no-extra");
-
-    //     //emit Scenario(6, address(repayUnderlyingToken), vars.repayAmount, address(seizedUnderlyingToken), vars.seizedUnderlyingAmount);
-    // }
 }
 
