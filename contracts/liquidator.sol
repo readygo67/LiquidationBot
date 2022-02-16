@@ -77,13 +77,13 @@ contract UniFlashSwap is IPancakeCallee {
         address borrower = tokens[4];
 
         uint[] memory amounts;
-        uint massProfit;
-        uint beforeSeizedVTokenAmount;
-        uint afterSeizedVTokenAmount;
-        uint seizedVTokenAmount;
-        uint beforeSeizedUnderlyingAmount;
-        uint afterSeizedUnderlyingAmount;
-        uint seizedUnderlyingAmount;
+        // uint massProfit;
+        // uint beforeSeizedVTokenAmount;
+        // uint afterSeizedVTokenAmount;
+        // uint seizedVTokenAmount;
+        // uint beforeSeizedUnderlyingAmount;
+        // uint afterSeizedUnderlyingAmount;
+        // uint seizedUnderlyingAmount;
 
 
         if(situation==1){
@@ -92,19 +92,19 @@ contract UniFlashSwap is IPancakeCallee {
             require(isStableCoin(tokens[0]), "1-not stable coin");
             require(tokens[0] == tokens[1], "1- not same coin");
 
-            beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+            uint beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
             require(repayVToken.liquidateBorrow(borrower, repayAmount, seizedVToken) == 0,"1-liquidateBorrow error "); //repay USDT, get vUSDT
-            afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
-            seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
+            uint afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+            uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
             require(seizedVTokenAmount > 0,"1-seized vtoken amount is zero");
 
-            beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+            uint beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
             require(seizedVToken.redeem(seizedVTokenAmount) == 0,"1-redeem error");              //redeem vUSDT to USDT
-            afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
-            seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
+            uint afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+            uint seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
             require(seizedUnderlyingAmount > flashLoanReturnAmount, "1-no extra");
 
-            massProfit = seizedUnderlyingAmount - flashLoanReturnAmount;
+            uint massProfit = seizedUnderlyingAmount - flashLoanReturnAmount;
             emit Scenario(1, address(repayUnderlyingToken), repayAmount, address(seizedUnderlyingToken), seizedUnderlyingAmount, flashLoanReturnAmount, massProfit);
         }
         else if(situation==2){
@@ -113,44 +113,44 @@ contract UniFlashSwap is IPancakeCallee {
                 //case2.1 repayToken is BNB, seizedToken is BNB 
                 IWETH(wBNB).withdraw(repayAmount); //change the flashLoaned wBNB to BNB.
 
-                beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
                 IVBNB(tokens[0]).liquidateBorrow{value: repayAmount}(borrower, tokens[1]); //repay BNB，get vBNB
-                afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
-                seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
+                uint afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
                 require(seizedVTokenAmount > 0,"2.1-seized vtoken amount is zero");
 
-                beforeSeizedUnderlyingAmount = address(this).balance;
+                uint beforeSeizedUnderlyingAmount = address(this).balance;
                 require(IVBNB(tokens[1]).redeem(seizedVTokenAmount)==0,"2.1-redeemerr");  //redeem vBNB to BNB
-                afterSeizedUnderlyingAmount = address(this).balance;
-                seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
+                uint afterSeizedUnderlyingAmount = address(this).balance;
+                uint seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
                 require(seizedUnderlyingAmount>flashLoanReturnAmount,"2.1-no-extra");
 
                 IWETH(wBNB).deposit{value:seizedUnderlyingAmount}(); //change BNB to wBNB
 
                 uint remain = seizedUnderlyingAmount-flashLoanReturnAmount; //calculate how much wBNB left after return flashloan
                 amounts = chainSwapExactIn(remain,_path2,address(this));  //swap the left wBNB to USDT
-                massProfit = amounts[amounts.length-1];
+                uint massProfit = amounts[amounts.length-1];
 
                 emit Scenario(2, address(repayUnderlyingToken), repayAmount, address(seizedUnderlyingToken), seizedUnderlyingAmount, flashLoanReturnAmount, massProfit);
             }
             else // not bnb
             {
                 //case2.2 repayToken is wETH, seizedToken is wETH
-                beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
                 require(repayVToken.liquidateBorrow(borrower, repayAmount, seizedVToken) == 0,"2.2-liquidateBorrow error "); //repay wETH, get vETH
-                afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
-                seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
+                uint afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
                 require(seizedVTokenAmount > 0,"2.2-seized vtoken amount is zero");
 
-                beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+                uint beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
                 require(seizedVToken.redeem(seizedVTokenAmount) == 0,"2.2-redeem error");          //redeem vETH to wETH
-                afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
-                seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
+                uint afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+                uint seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
                 require(seizedUnderlyingAmount > flashLoanReturnAmount, "2.2-no extra");
 
                 uint remain = seizedUnderlyingAmount - flashLoanReturnAmount;    //calculate how much ETH left after return flashloan
                 amounts = chainSwapExactIn(remain,_path2,address(this));  //swap the left wETH to USDT
-                massProfit = amounts[amounts.length-1];
+                uint massProfit = amounts[amounts.length-1];
 
                 emit Scenario(2, address(repayUnderlyingToken), repayAmount, address(seizedUnderlyingToken), seizedUnderlyingAmount, flashLoanReturnAmount, massProfit);
             }
@@ -160,56 +160,56 @@ contract UniFlashSwap is IPancakeCallee {
                 // case3.1 seizedToken is USDT, repayToken is BNB
                 IWETH(wBNB).withdraw(repayAmount); //change the flashLoaned wBNB to BNB.
 
-                beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
                 IVBNB(tokens[0]).liquidateBorrow{value: repayAmount}(borrower, tokens[1]); //repay BNB, get vUSDT
-                afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
-                seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
+                uint afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
                 require(seizedVTokenAmount > 0,"3.1-seized vtoken amount is zero");
 
-                beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+                uint beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
                 require(seizedVToken.redeem(seizedVTokenAmount)==0,"3.1-redeemerr");  // redeem vUSDT to USDT
-                afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
-                seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
+                uint afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+                uint seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
 
                 // change part of USDT to flashLoanReturnAmount wBNB for returning flashloan later
                 amounts =  chainSwapExactOut(flashLoanReturnAmount, _path1, address(this));
                 require(seizedUnderlyingAmount > amounts[0], "3.1-no-extra");
 
-                massProfit = seizedUnderlyingAmount - amounts[0];
+                uint massProfit = seizedUnderlyingAmount - amounts[0];
                 emit Scenario(3, address(repayUnderlyingToken), repayAmount, address(seizedUnderlyingToken), seizedUnderlyingAmount, flashLoanReturnAmount, massProfit);
             }else{
                 // case3.2 seizedToken is USDT, repayToken is wETH
-                beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
                 require(repayVToken.liquidateBorrow(borrower, repayAmount, seizedVToken) == 0,"3.2-liquidateBorrow error "); //repay wETH, get vUSDT
-                afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
-                seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
+                uint afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
                 require(seizedVTokenAmount > 0,"3.2-seized vtoken amount is zero");
 
-                beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+                uint beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
                 require(seizedVToken.redeem(seizedVTokenAmount) == 0,"3.2-redeem error");               //redeem vUSDT to USDT
-                afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
-                seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
+                uint afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+                uint seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
 
                 // change part of USDT to flashLoanReturnAmount wETH for returning flashloan later
                 amounts = chainSwapExactOut(flashLoanReturnAmount, _path1, address(this));
                 require(seizedUnderlyingAmount > amounts[0], "3.2-bnb-no-extra");
 
-                massProfit = seizedUnderlyingAmount - amounts[0];
+                uint massProfit = seizedUnderlyingAmount - amounts[0];
                 emit Scenario(3, address(repayUnderlyingToken), repayAmount, address(seizedUnderlyingToken), seizedUnderlyingAmount, flashLoanReturnAmount, massProfit);
             }
         }else if(situation==4){
             if (isVBNB(tokens[1])){
                 //case4.1 seizedToken is BNB, repayToken is USDT
-                beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
                 require(repayVToken.liquidateBorrow(borrower, repayAmount, seizedVToken) == 0,"4.1-liquidateBorrow error "); //repay USDT, get vBNB
-                afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
-                seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
+                uint afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
                 require(seizedVTokenAmount > 0,"4.1-seized vtoken amount is zero");
 
-                beforeSeizedUnderlyingAmount = address(this).balance;
+                uint beforeSeizedUnderlyingAmount = address(this).balance;
                 require(IVBNB(tokens[1]).redeem(seizedVTokenAmount) == 0,"4.1-redeem error");    //redeem vBNB to BNB
-                afterSeizedUnderlyingAmount = address(this).balance;
-                seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
+                uint afterSeizedUnderlyingAmount = address(this).balance;
+                uint seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
 
                 IWETH(wBNB).deposit{value:seizedUnderlyingAmount}();  //change BNB to wBNB
 
@@ -217,27 +217,27 @@ contract UniFlashSwap is IPancakeCallee {
                 amounts = chainSwapExactIn(seizedUnderlyingAmount, _path1, address(this));
                 uint usdtAmount = amounts[amounts.length-1];
                 require(usdtAmount > flashLoanReturnAmount, "4.1-no extra");
-                massProfit = usdtAmount - flashLoanReturnAmount;
+                uint massProfit = usdtAmount - flashLoanReturnAmount;
 
                 emit Scenario(4, address(repayUnderlyingToken), repayAmount, address(seizedUnderlyingToken), seizedUnderlyingAmount, flashLoanReturnAmount, massProfit);
             }else{
                 //case4.2 seizedToken is ETH, repayToken is USDT
-                beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
                 require(repayVToken.liquidateBorrow(borrower, repayAmount, seizedVToken) == 0,"4.2-liquidateBorrow error "); //repay USDT, get vETH
-                afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
-                seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
+                uint afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
                 require(seizedVTokenAmount > 0,"4.2-seized vtoken amount is zero");
 
-                beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+                uint beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
                 require(seizedVToken.redeem(seizedVTokenAmount) == 0,"4.2-redeem error");   //redeem vETH to wETH
-                afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
-                seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
+                uint afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+                uint seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
 
                 // change all wETH to USDT
                 amounts = chainSwapExactIn(seizedUnderlyingAmount, _path1, address(this));
                 uint usdtAmount = amounts[amounts.length-1];
                 require(usdtAmount > flashLoanReturnAmount, "4.2-no extra");
-                massProfit = usdtAmount - flashLoanReturnAmount;
+                uint massProfit = usdtAmount - flashLoanReturnAmount;
 
                 emit Scenario(4, address(repayUnderlyingToken), repayAmount, address(seizedUnderlyingToken), seizedUnderlyingAmount, flashLoanReturnAmount,massProfit);
             }
@@ -246,16 +246,16 @@ contract UniFlashSwap is IPancakeCallee {
                 //case5.1 seizedToken is ETH, repayToken is BNB,
                 IWETH(wBNB).withdraw(repayAmount); //change the flashLoaned wBNB to BNB.
 
-                beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
                 IVBNB(tokens[0]).liquidateBorrow{value: repayAmount}(borrower, tokens[1]); //repay BNB, get vETH
-                afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
-                seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
+                uint afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
                 require(seizedVTokenAmount > 0,"5.1-seized vtoken amount is zero");
 
-                beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+                uint beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
                 require(seizedVToken.redeem(seizedVTokenAmount) == 0,"5.1-redeem error");   //redeem vETH to wETH
-                afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
-                seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
+                uint afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+                uint seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
 
                 //change part of wETH to flashLoanReturnAmount wBNB
                 amounts = chainSwapExactOut(flashLoanReturnAmount, _path1, address(this));
@@ -265,20 +265,20 @@ contract UniFlashSwap is IPancakeCallee {
                 uint remain = seizedUnderlyingAmount - amounts[0];
                 amounts = chainSwapExactIn(remain, _path2, address(this));
 
-                massProfit = amounts[amounts.length-1];
+                uint massProfit = amounts[amounts.length-1];
                 emit Scenario(5, address(repayUnderlyingToken), repayAmount, address(seizedUnderlyingToken), seizedUnderlyingAmount, flashLoanReturnAmount, massProfit);
             }else if (isVBNB(tokens[1])){
                 //case5.2 seizedToken is BNB, repayToken is ETH
-                beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
                 require(repayVToken.liquidateBorrow(borrower, repayAmount, seizedVToken) == 0,"5.2-liquidateBorrow error"); //repay ETH, get vBNB
-                afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
-                seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
+                uint afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
                 require(seizedVTokenAmount > 0,"5.2-seized vtoken amount is zero");
 
-                beforeSeizedUnderlyingAmount = address(this).balance;
+                uint beforeSeizedUnderlyingAmount = address(this).balance;
                 require(IVBNB(tokens[1]).redeem(seizedVTokenAmount) == 0,"5.2-redeem error");    //redeem vBNB to BNB
-                afterSeizedUnderlyingAmount = address(this).balance;
-                seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
+                uint afterSeizedUnderlyingAmount = address(this).balance;
+                uint seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
 
                 IWETH(wBNB).deposit{value:seizedUnderlyingAmount}();  //change BNB to wBNB
 
@@ -290,20 +290,20 @@ contract UniFlashSwap is IPancakeCallee {
                 uint remain = seizedUnderlyingAmount - amounts[0];
                 amounts = chainSwapExactIn(remain, _path2, address(this));
 
-                massProfit = amounts[amounts.length-1];
+                uint massProfit = amounts[amounts.length-1];
                 emit Scenario(5, address(repayUnderlyingToken), repayAmount, address(seizedUnderlyingToken), seizedUnderlyingAmount, flashLoanReturnAmount, massProfit);
             }else{
                 //case5.3 repayToken is wETH, seizedToken is CAKE
-                beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
                 require(repayVToken.liquidateBorrow(borrower, repayAmount, seizedVToken) == 0,"5.3-liquidateBorrow error "); //repay wETH, get vCAKE
-                afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
-                seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
+                uint afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
                 require(seizedVTokenAmount > 0,"5.3-seized vtoken amount is zero");
 
-                beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+                uint beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
                 require(seizedVToken.redeem(seizedVTokenAmount) == 0,"5.3-redeem error");   //redeem vCAKE to CAKE
-                afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
-                seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
+                uint afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+                uint seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
 
                 //change part of CAKE to flashLoanReturnAmount ETH for returning flashloan later
                 amounts = chainSwapExactOut(flashLoanReturnAmount, _path1, address(this));
@@ -313,45 +313,45 @@ contract UniFlashSwap is IPancakeCallee {
                 uint remain = seizedUnderlyingAmount - amounts[0];
                 amounts = chainSwapExactIn(remain, _path2, address(this));
 
-                massProfit = amounts[amounts.length-1];
+                uint massProfit = amounts[amounts.length-1];
                 emit Scenario(5, address(repayUnderlyingToken), repayAmount, address(seizedUnderlyingToken), seizedUnderlyingAmount, flashLoanReturnAmount, massProfit);
             }
         }else if (situation==6){
             //case6 repayToken is VAI, seizedToken is USDT
-            beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+            uint beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
             (uint ok, uint actualRepayAmount) = IVAI(tokens[0]).liquidateVAI(borrower, repayAmount, seizedVToken);
             require(ok == 0,"6-liquidateBorrow error "); //repay VAI, get vUSDT
-            afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
-            seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
+            uint afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+            uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
             require(seizedVTokenAmount > 0,"5.3-seized vtoken amount is zero");
 
-            beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+            uint beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
             require(seizedVToken.redeem(seizedVTokenAmount) == 0,"6-redeem error");   //redeem vUSDT to USDT
-            afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
-            seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
+            uint afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+            uint seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
 
             // change part of USDT to flashLoanReturnAmount wVAI for returning flashloan later
             uint changeAmount = flashLoanReturnAmount + actualRepayAmount - repayAmount; 
             amounts = chainSwapExactOut(changeAmount, _path1, address(this));
             require(seizedUnderlyingAmount > amounts[0], "6-bnb-no-extra");
 
-            massProfit = seizedUnderlyingAmount - amounts[0];
+            uint massProfit = seizedUnderlyingAmount - amounts[0];
             emit Scenario(6, address(repayUnderlyingToken), repayAmount, address(seizedUnderlyingToken), seizedUnderlyingAmount, flashLoanReturnAmount, massProfit);
 
         }else if (situation==7){
             //case7.1 repayToken is VAI, seizedToken is BNB
             if (isVBNB(tokens[1])){
-                beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
                 (uint ok, uint actualRepayAmount) = IVAI(tokens[0]).liquidateVAI(borrower, repayAmount, seizedVToken); //repay VAI, get vBNB
                 require(ok == 0,"7.1-liquidateBorrow error "); 
-                afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
-                seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
+                uint afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
                 require(seizedVTokenAmount > 0,"7.1-seized vtoken amount is zero");
 
-                beforeSeizedUnderlyingAmount = address(this).balance;
+                uint beforeSeizedUnderlyingAmount = address(this).balance;
                 require(IVBNB(tokens[1]).redeem(seizedVTokenAmount) == 0,"7.1-redeem error");    //redeem vBNB to BNB
-                afterSeizedUnderlyingAmount = address(this).balance;
-                seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
+                uint afterSeizedUnderlyingAmount = address(this).balance;
+                uint seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
 
                 IWETH(wBNB).deposit{value:seizedUnderlyingAmount}();  //change BNB to wBNB
 
@@ -364,21 +364,21 @@ contract UniFlashSwap is IPancakeCallee {
                 uint remain = seizedUnderlyingAmount - amounts[0];
                 amounts = chainSwapExactIn(remain, _path2, address(this));
 
-                massProfit = amounts[amounts.length-1];
+                uint massProfit = amounts[amounts.length-1];
                 emit Scenario(7, address(repayUnderlyingToken), repayAmount, address(seizedUnderlyingToken), seizedUnderlyingAmount, flashLoanReturnAmount, massProfit);
             }else{
                 //case7.2 repayToken is VAI, seizedToken is wETH
-                beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
                 (uint ok, uint actualRepayAmount) = IVAI(tokens[0]).liquidateVAI(borrower, repayAmount, seizedVToken); //repay VAI, get vETH
                 require(ok == 0,"7.2-liquidateBorrow error");  
-                afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
-                seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
+                uint afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+                uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
                 require(seizedVTokenAmount > 0,"7.2-seized vtoken amount is zero");
 
-                beforeSeizedUnderlyingAmount = address(this).balance;
+                uint beforeSeizedUnderlyingAmount = address(this).balance;
                 require(seizedVToken.redeem(seizedVTokenAmount) == 0,"7.2-redeem error");    //redeem vETH to wETH
-                afterSeizedUnderlyingAmount = address(this).balance;
-                seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
+                uint afterSeizedUnderlyingAmount = address(this).balance;
+                uint seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
 
                 //change part of wETH to flashLoanReturnAmount VAI
                 uint changeAmount = flashLoanReturnAmount + actualRepayAmount - repayAmount; 
@@ -389,7 +389,7 @@ contract UniFlashSwap is IPancakeCallee {
                 uint remain = seizedUnderlyingAmount - amounts[0];
                 amounts = chainSwapExactIn(remain, _path2, address(this));
 
-                massProfit = amounts[amounts.length-1];
+                uint massProfit = amounts[amounts.length-1];
                 emit Scenario(7, address(repayUnderlyingToken), repayAmount, address(seizedUnderlyingToken), seizedUnderlyingAmount, flashLoanReturnAmount, massProfit);
             }
         }else{
