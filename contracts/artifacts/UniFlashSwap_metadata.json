@@ -1,0 +1,204 @@
+{
+	"compiler": {
+		"version": "0.8.7+commit.e28d00a7"
+	},
+	"language": "Solidity",
+	"output": {
+		"abi": [
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "seizedUnderlyingAmount",
+						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "massProfit",
+						"type": "uint256"
+					}
+				],
+				"name": "Profit",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "scenarioNo",
+						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "address",
+						"name": "repayUnderlyingToken",
+						"type": "address"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "repayAmount",
+						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "address",
+						"name": "seizedUnderlyingToken",
+						"type": "address"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "flashLoanReturnAmount",
+						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "seizedUnderlyingAmount",
+						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "massProfit",
+						"type": "uint256"
+					}
+				],
+				"name": "Scenario",
+				"type": "event"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "_sender",
+						"type": "address"
+					},
+					{
+						"internalType": "uint256",
+						"name": "_amount0",
+						"type": "uint256"
+					},
+					{
+						"internalType": "uint256",
+						"name": "_amount1",
+						"type": "uint256"
+					},
+					{
+						"internalType": "bytes",
+						"name": "_data",
+						"type": "bytes"
+					}
+				],
+				"name": "pancakeCall",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "uint256",
+						"name": "_situation",
+						"type": "uint256"
+					},
+					{
+						"internalType": "address",
+						"name": "_flashLoanFrom",
+						"type": "address"
+					},
+					{
+						"internalType": "address[]",
+						"name": "_path1",
+						"type": "address[]"
+					},
+					{
+						"internalType": "address[]",
+						"name": "_path2",
+						"type": "address[]"
+					},
+					{
+						"internalType": "address[]",
+						"name": "_tokens",
+						"type": "address[]"
+					},
+					{
+						"internalType": "uint256",
+						"name": "_flashLoanAmount",
+						"type": "uint256"
+					}
+				],
+				"name": "qingsuan",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			}
+		],
+		"devdoc": {
+			"kind": "dev",
+			"methods": {},
+			"version": 1
+		},
+		"userdoc": {
+			"kind": "user",
+			"methods": {},
+			"version": 1
+		}
+	},
+	"settings": {
+		"compilationTarget": {
+			"LiquidationBot/contracts/liquidator.sol": "UniFlashSwap"
+		},
+		"evmVersion": "london",
+		"libraries": {},
+		"metadata": {
+			"bytecodeHash": "ipfs"
+		},
+		"optimizer": {
+			"enabled": true,
+			"runs": 200
+		},
+		"remappings": []
+	},
+	"sources": {
+		"LiquidationBot/contracts/PancakeLibrary.sol": {
+			"keccak256": "0x9c9d9b7406de550600cef57b59a4fab7f62799c6a974a6d1dfbd97a6840067d9",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://d9ddba58a6a48ea483edf4973c5f4ee1e1b8e25078f550305b30c48482467a97",
+				"dweb:/ipfs/Qma9kfk4nrpzSnn9JEr5oeyTsHU3hDcuooAjZpkYbgidms"
+			]
+		},
+		"LiquidationBot/contracts/SafeMath.sol": {
+			"keccak256": "0xf2a8aba77f7c47ac2fb29897622e3d3ceaf0dd3c1ef685895242fa9541f27c34",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://5b1704be230acf1d4555a032bcd8b38d48dfe2763ea61ced2fd5e8889036acb2",
+				"dweb:/ipfs/QmezxGeADPzpJA8PdSCYHQRDoytY14xY8SkvP9FwMVp54K"
+			]
+		},
+		"LiquidationBot/contracts/interface.sol": {
+			"keccak256": "0xc513739a12eb5ae48d7ec044ded920e075a67ba3fc031ba375159aaad6ef99a5",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://df9704154d56f20d56a495eeef9548158cf05f151d15dc6e4b78cdb08e9f4d6b",
+				"dweb:/ipfs/QmPeMqxWraLqfwVGCsL65Qi5EVPqV5zzCwRhoqZ4tViMmm"
+			]
+		},
+		"LiquidationBot/contracts/liquidator.sol": {
+			"keccak256": "0x5f0768dfff609052c29a2ce45d9f2f38a10418ae54552888e2010d5d7013ccc4",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://481b432479c410669abe7901029cab3ca0d5b32a6a87fbaacc9f97d421593ca6",
+				"dweb:/ipfs/QmYfNGPUoRuhmnPgbGzV8rjGvmQqBaMCU7WRFmx5pPbw58"
+			]
+		}
+	},
+	"version": 1
+}
