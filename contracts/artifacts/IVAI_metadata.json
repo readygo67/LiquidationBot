@@ -1,0 +1,80 @@
+{
+	"compiler": {
+		"version": "0.8.11+commit.d7f03943"
+	},
+	"language": "Solidity",
+	"output": {
+		"abi": [
+			{
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "borrower",
+						"type": "address"
+					},
+					{
+						"internalType": "uint256",
+						"name": "repayAmount",
+						"type": "uint256"
+					},
+					{
+						"internalType": "contract VTokenInterface",
+						"name": "vTokenCollateral",
+						"type": "address"
+					}
+				],
+				"name": "liquidateVAI",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					},
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			}
+		],
+		"devdoc": {
+			"kind": "dev",
+			"methods": {},
+			"version": 1
+		},
+		"userdoc": {
+			"kind": "user",
+			"methods": {},
+			"version": 1
+		}
+	},
+	"settings": {
+		"compilationTarget": {
+			"LiquidationBot/contracts/interface.sol": "IVAI"
+		},
+		"evmVersion": "london",
+		"libraries": {},
+		"metadata": {
+			"bytecodeHash": "ipfs"
+		},
+		"optimizer": {
+			"enabled": true,
+			"runs": 200
+		},
+		"remappings": []
+	},
+	"sources": {
+		"LiquidationBot/contracts/interface.sol": {
+			"keccak256": "0xc513739a12eb5ae48d7ec044ded920e075a67ba3fc031ba375159aaad6ef99a5",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://df9704154d56f20d56a495eeef9548158cf05f151d15dc6e4b78cdb08e9f4d6b",
+				"dweb:/ipfs/QmPeMqxWraLqfwVGCsL65Qi5EVPqV5zzCwRhoqZ4tViMmm"
+			]
+		}
+	},
+	"version": 1
+}
