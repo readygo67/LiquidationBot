@@ -6,6 +6,73 @@
 	"output": {
 		"abi": [
 			{
+				"inputs": [],
+				"stateMutability": "nonpayable",
+				"type": "constructor"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "address",
+						"name": "",
+						"type": "address"
+					},
+					{
+						"indexed": false,
+						"internalType": "address[]",
+						"name": "",
+						"type": "address[]"
+					},
+					{
+						"indexed": false,
+						"internalType": "address[]",
+						"name": "",
+						"type": "address[]"
+					},
+					{
+						"indexed": false,
+						"internalType": "address[]",
+						"name": "",
+						"type": "address[]"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"name": "Debug1",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "previousOwner",
+						"type": "address"
+					},
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "newOwner",
+						"type": "address"
+					}
+				],
+				"name": "OwnershipTransferred",
+				"type": "event"
+			},
+			{
 				"anonymous": false,
 				"inputs": [
 					{
@@ -53,6 +120,19 @@
 				],
 				"name": "Scenario",
 				"type": "event"
+			},
+			{
+				"inputs": [],
+				"name": "owner",
+				"outputs": [
+					{
+						"internalType": "address",
+						"name": "",
+						"type": "address"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
 			},
 			{
 				"inputs": [
@@ -119,11 +199,63 @@
 				"outputs": [],
 				"stateMutability": "nonpayable",
 				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "renounceOwnership",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "newOwner",
+						"type": "address"
+					}
+				],
+				"name": "transferOwnership",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "_token",
+						"type": "address"
+					},
+					{
+						"internalType": "uint256",
+						"name": "_amount",
+						"type": "uint256"
+					}
+				],
+				"name": "withdraw",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"stateMutability": "payable",
+				"type": "receive"
 			}
 		],
 		"devdoc": {
 			"kind": "dev",
-			"methods": {},
+			"methods": {
+				"owner()": {
+					"details": "Returns the address of the current owner."
+				},
+				"renounceOwnership()": {
+					"details": "Leaves the contract without owner. It will not be possible to call `onlyOwner` functions anymore. Can only be called by the current owner. NOTE: Renouncing ownership will leave the contract without an owner, thereby removing any functionality that is only available to the owner."
+				},
+				"transferOwnership(address)": {
+					"details": "Transfers ownership of the contract to a new account (`newOwner`). Can only be called by the current owner."
+				}
+			},
 			"version": 1
 		},
 		"userdoc": {
@@ -148,6 +280,30 @@
 		"remappings": []
 	},
 	"sources": {
+		"@openzeppelin/contracts/access/Ownable.sol": {
+			"keccak256": "0x24e0364e503a9bbde94c715d26573a76f14cd2a202d45f96f52134ab806b67b9",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://e12cbaa7378fd9b62280e4e1d164bedcb4399ce238f5f98fc0eefb7e50577981",
+				"dweb:/ipfs/QmXRoFGUgfsaRkoPT5bxNMtSayKTQ8GZATLPXf69HcRA51"
+			]
+		},
+		"@openzeppelin/contracts/utils/Address.sol": {
+			"keccak256": "0x2ccf9d2313a313d41a791505f2b5abfdc62191b5d4334f7f7a82691c088a1c87",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://b3a57d0854b2fdce6ebff933a48dca2445643d1eccfc27f00292e937f26c6a58",
+				"dweb:/ipfs/QmW45rZooS9TqR4YXUbjRbtf2Bpb5ouSarBvfW1LdGprvV"
+			]
+		},
+		"@openzeppelin/contracts/utils/Context.sol": {
+			"keccak256": "0xe2e337e6dde9ef6b680e07338c493ebea1b5fd09b43424112868e9cc1706bca7",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://6df0ddf21ce9f58271bdfaa85cde98b200ef242a05a3f85c2bc10a8294800a92",
+				"dweb:/ipfs/QmRK2Y5Yc6BK7tGKkgsgn3aJEQGi5aakeSPZvS65PV8Xp3"
+			]
+		},
 		"LiquidationBot/contracts/PancakeLibrary.sol": {
 			"keccak256": "0x9c9d9b7406de550600cef57b59a4fab7f62799c6a974a6d1dfbd97a6840067d9",
 			"license": "MIT",
@@ -165,19 +321,19 @@
 			]
 		},
 		"LiquidationBot/contracts/interface.sol": {
-			"keccak256": "0xc513739a12eb5ae48d7ec044ded920e075a67ba3fc031ba375159aaad6ef99a5",
+			"keccak256": "0xcca50a0d822dd49a1dc10ccd981417cafe9f2e1988c6ed8d7442fd541cb672bb",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://df9704154d56f20d56a495eeef9548158cf05f151d15dc6e4b78cdb08e9f4d6b",
-				"dweb:/ipfs/QmPeMqxWraLqfwVGCsL65Qi5EVPqV5zzCwRhoqZ4tViMmm"
+				"bzz-raw://1f18ee63e019c3d81835f23af21eea3cd96667e52cb6d1715d01bdc933cad1ac",
+				"dweb:/ipfs/QmfM3LJ1zRhdhinLYEnpktTS1RkLvQr5ZmpNayzmao4uMf"
 			]
 		},
 		"LiquidationBot/contracts/liquidator.sol": {
-			"keccak256": "0xe8ce02012729fc3a9893226cf3c186e5cb8197d06a449db17aaa1ddd675a630a",
+			"keccak256": "0x40f374867ba902516d2128ac6289db911f3494de2cf892a5a5724dc8422b4616",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://ff68e6e1970989efcb105e389eec78dca39191992c900b0044fc27d579f351f9",
-				"dweb:/ipfs/QmNx3mWjrvmuw8yfLdSbrZAqB54mLjLDWgW3snjETtF4dD"
+				"bzz-raw://815bc6d785972607503217dbcecde3c253cbb98abb2c233f16b2ad5892bb5fe6",
+				"dweb:/ipfs/QmcAtnUuQM7vR6V72surEpYnirVUBFAY6sc3nfNGnic2c3"
 			]
 		}
 	},

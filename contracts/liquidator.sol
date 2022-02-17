@@ -3,9 +3,10 @@ pragma solidity ^0.8;
 
 import "./interface.sol";
 import "./PancakeLibrary.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Address.sol";
 
-
-contract UniFlashSwap is IPancakeCallee {
+contract UniFlashSwap is IPancakeCallee,Ownable{
     address private constant ComptrollerAddr = 0xfD36E2c2a6789Db23113685031d7F16329158384;
     address private constant wBNB = 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
     address private constant FACTORY = 0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73;
@@ -14,7 +15,10 @@ contract UniFlashSwap is IPancakeCallee {
     address private constant vUSDT = 0xfD5840Cd36d94D7229439859C0112a4185BC0255;
     address private constant vDAI = 0x334b3eCB4DCa3593BCCC3c7EBD1A1C1d1780FBF1;
 
+    mapping(address => mapping(address => bool)) approves;
+
     event Scenario(uint scenarioNo, address repayUnderlyingToken, uint repayAmount, address seizedUnderlyingToken, uint flashLoanReturnAmount,uint seizedUnderlyingAmount, uint massProfit);
+    event Debug1(uint, address, address[], address[], address[], uint);
 
     struct LocalVars {
         uint situation;
@@ -39,6 +43,7 @@ contract UniFlashSwap is IPancakeCallee {
         uint massProfit;
     }
 
+    constructor(){}
 
     //situcation： 情况 1-5
     //ch： 借钱用的pair地址
@@ -52,8 +57,19 @@ contract UniFlashSwap is IPancakeCallee {
     // [4] - target 目标账号
     //_flashLoanAmount ： 借多少？ 还多少？
     function qingsuan(uint _situation, address _flashLoanFrom, address [] calldata  _path1,  address [] calldata  _path2,address [] calldata  _tokens, uint _flashLoanAmount) external {
-        require(_situation>=1&&_situation<=5,"wrong si");
+        require(_situation>=1&&_situation<=7,"wrong si");
         require(_flashLoanFrom != address(0), "!pair");
+
+        (,,uint shortfall) = Comptroller(ComptrollerAddr).getAccountLiquidity(_tokens[4]);
+        require(shortfall > 0, "shortfall must greater than zer 0");
+        emit Debug1(_situation, _flashLoanFrom, _path1, _path2, _tokens, _flashLoanAmount);
+        
+        if (!approves[_tokens[3]][_tokens[0]]){
+            IERC20(_tokens[3]).approve(_tokens[0], ~uint(0));
+            approves[_tokens[3]][_tokens[0]] = true;
+        }
+
+
         //token0，token1的顺序要确定好
         address token0 = IPancakePair(_flashLoanFrom).token0();
         address token1 = IPancakePair(_flashLoanFrom).token1();
@@ -72,8 +88,8 @@ contract UniFlashSwap is IPancakeCallee {
         bytes calldata _data
     ) external override {
         LocalVars  memory vars;
-        (vars.situation,vars.flashLoanFrom, vars.path1,  vars.path2, vars.tokens, vars.repayAmount) = abi.decode(_data, (uint,address,address [],address [],address [],uint));
 
+        (vars.situation,vars.flashLoanFrom, vars.path1,  vars.path2, vars.tokens, vars.repayAmount) = abi.decode(_data, (uint,address,address [],address [],address [],uint));
         require(msg.sender == vars.flashLoanFrom, "!pair");
         require(_sender == address(this), "!sender");
 
@@ -410,7 +426,7 @@ contract UniFlashSwap is IPancakeCallee {
         // TransferHelper.safeTransferFrom(
         //     path[0], msg.sender, PancakeLibrary.pairFor(factory, path[0], path[1]), amounts[0]
         // );
-        IERC20(path[0]).transfer( PancakeLibrary.pairFor(FACTORY, path[0], path[1]), amounts[0]);
+       IERC20(path[0]).transfer(PancakeLibrary.pairFor(FACTORY, path[0], path[1]), amounts[0]);
         _swap(amounts, path, to);
         return amounts;
     }
@@ -431,6 +447,13 @@ contract UniFlashSwap is IPancakeCallee {
         }
     }
 
+    function withdraw(address _token, uint _amount) onlyOwner external{
+        require(_token != address(0), "address must not be zero");
+        require(_amount >0, "amount must bigger than zero");
+        IERC20(_token).transfer(msg.sender, _amount);
+    }
+
+    receive() payable external{}
 
     function isVBNB(address _token) internal pure returns(bool){
         return (_token == vBNB);

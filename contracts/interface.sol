@@ -232,7 +232,6 @@ interface IPancakeFactory {
 }
 
 interface Comptroller {
-
   function accountAssets ( address, uint256 ) external view returns ( address );
   function admin (  ) external view returns ( address );
   function allMarkets ( uint256 ) external view returns ( address );
