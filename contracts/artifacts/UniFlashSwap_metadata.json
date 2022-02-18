@@ -6,11 +6,6 @@
 	"output": {
 		"abi": [
 			{
-				"inputs": [],
-				"stateMutability": "nonpayable",
-				"type": "constructor"
-			},
-			{
 				"anonymous": false,
 				"inputs": [
 					{
@@ -83,12 +78,31 @@
 					},
 					{
 						"indexed": false,
-						"internalType": "address",
+						"internalType": "uint256",
 						"name": "",
-						"type": "address"
+						"type": "uint256"
 					}
 				],
-				"name": "Pairs",
+				"name": "PancakeCall",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"name": "Qingsuan",
 				"type": "event"
 			},
 			{
@@ -139,32 +153,6 @@
 				],
 				"name": "Scenario",
 				"type": "event"
-			},
-			{
-				"anonymous": false,
-				"inputs": [
-					{
-						"indexed": false,
-						"internalType": "uint256",
-						"name": "",
-						"type": "uint256"
-					},
-					{
-						"indexed": false,
-						"internalType": "uint256",
-						"name": "",
-						"type": "uint256"
-					}
-				],
-				"name": "SwapOneWBNBToUSDT",
-				"type": "event"
-			},
-			{
-				"inputs": [],
-				"name": "depositOneBNB",
-				"outputs": [],
-				"stateMutability": "nonpayable",
-				"type": "function"
 			},
 			{
 				"inputs": [],
@@ -253,15 +241,14 @@
 				"type": "function"
 			},
 			{
-				"inputs": [],
-				"name": "swapOneBNBToBUSD",
-				"outputs": [],
-				"stateMutability": "nonpayable",
-				"type": "function"
-			},
-			{
-				"inputs": [],
-				"name": "swapOneBNBToBUSD1",
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "_flashLoanUnderlyingToken",
+						"type": "address"
+					}
+				],
+				"name": "swapOneBNBToFlashLoandUnderlyingToken",
 				"outputs": [],
 				"stateMutability": "nonpayable",
 				"type": "function"
@@ -333,7 +320,7 @@
 			"bytecodeHash": "ipfs"
 		},
 		"optimizer": {
-			"enabled": true,
+			"enabled": false,
 			"runs": 200
 		},
 		"remappings": []
@@ -364,11 +351,11 @@
 			]
 		},
 		"LiquidationBot/contracts/PancakeLibrary.sol": {
-			"keccak256": "0xa722b6ca4f3c8492b973449f3f278e42faa2ff49b8a7b917a1fa9254b0e94c43",
+			"keccak256": "0xb628d9ce3df8a8ad3d8e3fe89b9f4e9bbbcad4d2590a082e134661f09c40fe8b",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://0cec7ddcaab4c6547b66c2b6d1b7c3de87aff5aac43c60569b13bde11d486f37",
-				"dweb:/ipfs/QmRx7xifQvpPTgzEfX3MMqCxXxftfjJzDK2bFv9B9jnLgY"
+				"bzz-raw://d893c8c52c633cd32bcfa390d46be56ab4f8f6f6a9869ee47f4532a6ef00346c",
+				"dweb:/ipfs/QmNPjZdQa3ga8yDgd1ZfwG2rVJH9TbV3nAqvC3PBVv2HiH"
 			]
 		},
 		"LiquidationBot/contracts/SafeMath.sol": {
@@ -388,11 +375,11 @@
 			]
 		},
 		"LiquidationBot/contracts/liquidator.sol": {
-			"keccak256": "0xadfe8951bb2e2cb994dd555c11e1c328957460814728acc3525842d5ef61dbed",
+			"keccak256": "0x23eec81935b4ac33711cd23e438318e2af45689128fb73cbb5db881123a04ddf",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://edde5a50205a27460b7575354a57d49281ebc336e9b0b05bfc89d1a717dd5ce4",
-				"dweb:/ipfs/QmXP4VESabhFk7nGjVdqzXVzMajAtK85U4STuMsM7yRG7n"
+				"bzz-raw://f6da822e93209e02f27274cf35f4d26e60e35c264be0f50280b61dca1955d028",
+				"dweb:/ipfs/QmeJFW1BP131S38FCE4qEyZEtALWwHz8G9YoR1nd3AuLYU"
 			]
 		}
 	},
