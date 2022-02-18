@@ -14,6 +14,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
     address private constant vBUSD = 0x95c78222B3D6e262426483D42CfA53685A67Ab9D;
     address private constant vUSDT = 0xfD5840Cd36d94D7229439859C0112a4185BC0255;
     address private constant vDAI = 0x334b3eCB4DCa3593BCCC3c7EBD1A1C1d1780FBF1;
+    address private constant ROUTER = 0x10ED43C718714eb63d5aA57B78B54704E256024E;
   
 
     mapping(address => mapping(address => bool)) approves;
@@ -21,7 +22,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
     event Scenario(uint scenarioNo, address repayUnderlyingToken, uint repayAmount, address seizedUnderlyingToken, uint flashLoanReturnAmount,uint seizedUnderlyingAmount, uint massProfit);
     event Debug1(uint, address, address[], address[], address[], uint);
     event SwapOneWBNBToUSDT(uint, uint);
-    
+
     struct LocalVars {
         uint situation;
         address flashLoanFrom;
@@ -56,6 +57,16 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
     // }
 
       function swapOneWBNBToBUSD1() external{
+        uint amount = 1 ether;
+        address[] memory path = new address[](2);
+        path[0] = wBNB;
+        path[1] = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56; 
+        uint[] memory amounts = IPancakeRouter02(ROUTER).getAmountsOut(amount, path);
+        emit SwapOneWBNBToUSDT(amounts[0], amounts[1]);
+       // IERC20(path[0]).transfer(PancakeLibrary.pairFor(FACTORY, path[0], path[1]), amounts[0]);
+    }
+
+    function swapOneWBNBToBUSD2() external{
         uint amount = 1 ether;
         address[] memory path = new address[](2);
         path[0] = wBNB;
@@ -113,6 +124,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         // IPancakePair(_flashLoanFrom).swap(amount0Out, amount1Out, address(this), callbackdata);
     }
 
+    
     //callback function from pair
     function pancakeCall(
         address _sender,
@@ -142,7 +154,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         IERC20 repayUnderlyingToken = IERC20(vars.tokens[3]);
         IERC20 seizedUnderlyingToken = IERC20(vars.tokens[2]);
         uint[] memory amounts;
-
+        /*
         if(vars.situation==1){
             //case1: repayToken is USDT, seizedToken is USDT
             require(vars.path1.length==0 && vars.path2.length==0,"1-patherr");
@@ -436,9 +448,10 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         }
 
         repayUnderlyingToken.transfer(vars.flashLoanFrom, vars.flashLoanReturnAmount);
-        
+        */
         emit Scenario(vars.situation, address(repayUnderlyingToken), vars.repayAmount, address(seizedUnderlyingToken), vars.flashLoanReturnAmount, vars.seizedUnderlyingAmount, vars.massProfit);
     }
+    
 
 
     function chainSwapExactIn(uint amountIn, address[] memory path, address to) internal returns(uint[] memory amounts){

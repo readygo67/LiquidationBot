@@ -1,6 +1,6 @@
 {
 	"compiler": {
-		"version": "0.8.11+commit.d7f03943"
+		"version": "0.8.7+commit.e28d00a7"
 	},
 	"language": "Solidity",
 	"output": {
@@ -795,11 +795,11 @@
 	},
 	"sources": {
 		"LiquidationBot/contracts/interface.sol": {
-			"keccak256": "0xc513739a12eb5ae48d7ec044ded920e075a67ba3fc031ba375159aaad6ef99a5",
+			"keccak256": "0xd93fdc5b27783f6212c18dcb6b6858c4b5440072293d8f7888df88a84176076b",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://df9704154d56f20d56a495eeef9548158cf05f151d15dc6e4b78cdb08e9f4d6b",
-				"dweb:/ipfs/QmPeMqxWraLqfwVGCsL65Qi5EVPqV5zzCwRhoqZ4tViMmm"
+				"bzz-raw://6d3fb47f4eb2022dd2ba0a3b6419fb5e66dc8f348a62ce0a09a19c50b3f12609",
+				"dweb:/ipfs/QmSMSTFRydQCMMYkhGNzHw5oJW3bvvCr3KWYeRWKTs6z8t"
 			]
 		}
 	},

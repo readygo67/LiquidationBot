@@ -241,6 +241,13 @@
 				"type": "function"
 			},
 			{
+				"inputs": [],
+				"name": "swapOneWBNBToBUSD2",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
 				"inputs": [
 					{
 						"internalType": "address",
@@ -354,19 +361,19 @@
 			]
 		},
 		"LiquidationBot/contracts/interface.sol": {
-			"keccak256": "0xcca50a0d822dd49a1dc10ccd981417cafe9f2e1988c6ed8d7442fd541cb672bb",
+			"keccak256": "0xd93fdc5b27783f6212c18dcb6b6858c4b5440072293d8f7888df88a84176076b",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://1f18ee63e019c3d81835f23af21eea3cd96667e52cb6d1715d01bdc933cad1ac",
-				"dweb:/ipfs/QmfM3LJ1zRhdhinLYEnpktTS1RkLvQr5ZmpNayzmao4uMf"
+				"bzz-raw://6d3fb47f4eb2022dd2ba0a3b6419fb5e66dc8f348a62ce0a09a19c50b3f12609",
+				"dweb:/ipfs/QmSMSTFRydQCMMYkhGNzHw5oJW3bvvCr3KWYeRWKTs6z8t"
 			]
 		},
 		"LiquidationBot/contracts/liquidator.sol": {
-			"keccak256": "0xf3c04fa2f6e41a8b15b1940be7b8967b52868e76fafc2ae445eb98d78e4beea2",
+			"keccak256": "0xedf57bdb636aa97511edcae37c1bdde87c2d16f2e6250fca61afe2c3f50459e6",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://2802e507db93643893e70afe814be680677b34fb6d0fec3c77c0ddf06bbf68d9",
-				"dweb:/ipfs/QmTpTKb6ng8Pzxi5VmSJKmd3FcAWxQztNooQ3qGcfaQebh"
+				"bzz-raw://2cc12e5df4d537e7d1fc6b56aa0ba2870e6b5d543a357d7d9ff9c7e4c58be537",
+				"dweb:/ipfs/QmdxhPSgdS5daq5FRP1BZCDD7sEsizNipuAEeUqW8stCu2"
 			]
 		}
 	},
