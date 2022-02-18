@@ -122,6 +122,32 @@
 				"type": "event"
 			},
 			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"name": "SwapOneWBNBToUSDT",
+				"type": "event"
+			},
+			{
+				"inputs": [],
+				"name": "depositOneBNB",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
 				"inputs": [],
 				"name": "owner",
 				"outputs": [
@@ -203,6 +229,13 @@
 			{
 				"inputs": [],
 				"name": "renounceOwnership",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "swapOneWBNBToBUSD1",
 				"outputs": [],
 				"stateMutability": "nonpayable",
 				"type": "function"
@@ -329,11 +362,11 @@
 			]
 		},
 		"LiquidationBot/contracts/liquidator.sol": {
-			"keccak256": "0x40f374867ba902516d2128ac6289db911f3494de2cf892a5a5724dc8422b4616",
+			"keccak256": "0xf3c04fa2f6e41a8b15b1940be7b8967b52868e76fafc2ae445eb98d78e4beea2",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://815bc6d785972607503217dbcecde3c253cbb98abb2c233f16b2ad5892bb5fe6",
-				"dweb:/ipfs/QmcAtnUuQM7vR6V72surEpYnirVUBFAY6sc3nfNGnic2c3"
+				"bzz-raw://2802e507db93643893e70afe814be680677b34fb6d0fec3c77c0ddf06bbf68d9",
+				"dweb:/ipfs/QmTpTKb6ng8Pzxi5VmSJKmd3FcAWxQztNooQ3qGcfaQebh"
 			]
 		}
 	},

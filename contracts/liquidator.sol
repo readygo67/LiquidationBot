@@ -14,12 +14,14 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
     address private constant vBUSD = 0x95c78222B3D6e262426483D42CfA53685A67Ab9D;
     address private constant vUSDT = 0xfD5840Cd36d94D7229439859C0112a4185BC0255;
     address private constant vDAI = 0x334b3eCB4DCa3593BCCC3c7EBD1A1C1d1780FBF1;
+  
 
     mapping(address => mapping(address => bool)) approves;
 
     event Scenario(uint scenarioNo, address repayUnderlyingToken, uint repayAmount, address seizedUnderlyingToken, uint flashLoanReturnAmount,uint seizedUnderlyingAmount, uint massProfit);
     event Debug1(uint, address, address[], address[], address[], uint);
-
+    event SwapOneWBNBToUSDT(uint, uint);
+    
     struct LocalVars {
         uint situation;
         address flashLoanFrom;
@@ -45,6 +47,29 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
 
     constructor(){}
 
+    // function swapOneWBNBToBUSD() external{
+    //     uint amount = 1 ether;
+    //     address[] memory path = new address[](2);
+    //     path[0] = wBNB;
+    //     path[1] = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56; 
+    //     chainSwapExactIn(amount, path, address(this));
+    // }
+
+      function swapOneWBNBToBUSD1() external{
+        uint amount = 1 ether;
+        address[] memory path = new address[](2);
+        path[0] = wBNB;
+        path[1] = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56; 
+        uint[] memory amounts = PancakeLibrary.getAmountsOut(FACTORY, amount, path);
+        emit SwapOneWBNBToUSDT(amounts[0], amounts[1]);
+       // IERC20(path[0]).transfer(PancakeLibrary.pairFor(FACTORY, path[0], path[1]), amounts[0]);
+    }
+
+    function depositOneBNB() external{
+        uint amount = 1 ether;
+        IWETH(wBNB).deposit{value: amount}();
+    }
+
     //situcation： 情况 1-5
     //ch： 借钱用的pair地址
     //sellPath： 卖的时候的path
@@ -69,15 +94,23 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
             approves[_tokens[3]][_tokens[0]] = true;
         }
 
+        // uint amount = 1 ether;
+        // IWETH(wBNB).deposit{value: amount}();
+        // address[] memory path = new address[](2);
+        // path[0] = wBNB;
+        // path[1] = _tokens[3]; 
+        // chainSwapExactIn(amount, path, address(this));
+        
 
-        //token0，token1的顺序要确定好
-        address token0 = IPancakePair(_flashLoanFrom).token0();
-        address token1 = IPancakePair(_flashLoanFrom).token1();
-        //我们只想要一种币，看好0和1那个是我们要借的，把数设置好，另外一种币设置成0
-        uint amount0Out = _tokens[3] == token0 ? _flashLoanAmount : 0;
-        uint amount1Out = _tokens[3] == token1 ? _flashLoanAmount : 0;
-        bytes memory callbackdata = abi.encode(_situation,_flashLoanFrom,_path1,_path2,_tokens,_flashLoanAmount);
-        IPancakePair(_flashLoanFrom).swap(amount0Out, amount1Out, address(this), callbackdata);
+
+        // //token0，token1的顺序要确定好
+        // address token0 = IPancakePair(_flashLoanFrom).token0();
+        // address token1 = IPancakePair(_flashLoanFrom).token1();
+        // //我们只想要一种币，看好0和1那个是我们要借的，把数设置好，另外一种币设置成0
+        // uint amount0Out = _tokens[3] == token0 ? _flashLoanAmount : 0;
+        // uint amount1Out = _tokens[3] == token1 ? _flashLoanAmount : 0;
+        // bytes memory callbackdata = abi.encode(_situation,_flashLoanFrom,_path1,_path2,_tokens,_flashLoanAmount);
+        // IPancakePair(_flashLoanFrom).swap(amount0Out, amount1Out, address(this), callbackdata);
     }
 
     //callback function from pair
