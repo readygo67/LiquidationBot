@@ -77,6 +77,25 @@
 				"inputs": [
 					{
 						"indexed": false,
+						"internalType": "address",
+						"name": "",
+						"type": "address"
+					},
+					{
+						"indexed": false,
+						"internalType": "address",
+						"name": "",
+						"type": "address"
+					}
+				],
+				"name": "Pairs",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": false,
 						"internalType": "uint256",
 						"name": "scenarioNo",
 						"type": "uint256"
@@ -235,14 +254,14 @@
 			},
 			{
 				"inputs": [],
-				"name": "swapOneWBNBToBUSD1",
+				"name": "swapOneBNBToBUSD",
 				"outputs": [],
 				"stateMutability": "nonpayable",
 				"type": "function"
 			},
 			{
 				"inputs": [],
-				"name": "swapOneWBNBToBUSD2",
+				"name": "swapOneBNBToBUSD1",
 				"outputs": [],
 				"stateMutability": "nonpayable",
 				"type": "function"
@@ -345,11 +364,11 @@
 			]
 		},
 		"LiquidationBot/contracts/PancakeLibrary.sol": {
-			"keccak256": "0x9c9d9b7406de550600cef57b59a4fab7f62799c6a974a6d1dfbd97a6840067d9",
+			"keccak256": "0xa722b6ca4f3c8492b973449f3f278e42faa2ff49b8a7b917a1fa9254b0e94c43",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://d9ddba58a6a48ea483edf4973c5f4ee1e1b8e25078f550305b30c48482467a97",
-				"dweb:/ipfs/Qma9kfk4nrpzSnn9JEr5oeyTsHU3hDcuooAjZpkYbgidms"
+				"bzz-raw://0cec7ddcaab4c6547b66c2b6d1b7c3de87aff5aac43c60569b13bde11d486f37",
+				"dweb:/ipfs/QmRx7xifQvpPTgzEfX3MMqCxXxftfjJzDK2bFv9B9jnLgY"
 			]
 		},
 		"LiquidationBot/contracts/SafeMath.sol": {
@@ -369,11 +388,11 @@
 			]
 		},
 		"LiquidationBot/contracts/liquidator.sol": {
-			"keccak256": "0xedf57bdb636aa97511edcae37c1bdde87c2d16f2e6250fca61afe2c3f50459e6",
+			"keccak256": "0xadfe8951bb2e2cb994dd555c11e1c328957460814728acc3525842d5ef61dbed",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://2cc12e5df4d537e7d1fc6b56aa0ba2870e6b5d543a357d7d9ff9c7e4c58be537",
-				"dweb:/ipfs/QmdxhPSgdS5daq5FRP1BZCDD7sEsizNipuAEeUqW8stCu2"
+				"bzz-raw://edde5a50205a27460b7575354a57d49281ebc336e9b0b05bfc89d1a717dd5ce4",
+				"dweb:/ipfs/QmXP4VESabhFk7nGjVdqzXVzMajAtK85U4STuMsM7yRG7n"
 			]
 		}
 	},

@@ -22,6 +22,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
     event Scenario(uint scenarioNo, address repayUnderlyingToken, uint repayAmount, address seizedUnderlyingToken, uint flashLoanReturnAmount,uint seizedUnderlyingAmount, uint massProfit);
     event Debug1(uint, address, address[], address[], address[], uint);
     event SwapOneWBNBToUSDT(uint, uint);
+    event Pairs(address, address);
 
     struct LocalVars {
         uint situation;
@@ -48,33 +49,43 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
 
     constructor(){}
 
-    // function swapOneWBNBToBUSD() external{
-    //     uint amount = 1 ether;
-    //     address[] memory path = new address[](2);
-    //     path[0] = wBNB;
-    //     path[1] = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56; 
-    //     chainSwapExactIn(amount, path, address(this));
-    // }
-
-      function swapOneWBNBToBUSD1() external{
+    function swapOneBNBToBUSD() external{
         uint amount = 1 ether;
+         IWETH(wBNB).deposit{value: amount}();
+
+        address[] memory path = new address[](2);
+        path[0] = wBNB;
+        path[1] = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56; 
+        chainSwapExactIn(amount, path, address(this));
+    }
+
+      function swapOneBNBToBUSD1() external{
+        uint amount = 1 ether;
+        IWETH(wBNB).deposit{value: amount}();
+        IERC20(wBNB).approve(ROUTER, ~uint(0));
+
+
         address[] memory path = new address[](2);
         path[0] = wBNB;
         path[1] = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56; 
         uint[] memory amounts = IPancakeRouter02(ROUTER).getAmountsOut(amount, path);
+        
+        IPancakeRouter02(ROUTER).swapExactTokensForTokens(amount, 0,path,address(this), ~uint(0));
         emit SwapOneWBNBToUSDT(amounts[0], amounts[1]);
-       // IERC20(path[0]).transfer(PancakeLibrary.pairFor(FACTORY, path[0], path[1]), amounts[0]);
+        //IERC20(path[0]).transfer(PancakeLibrary.pairFor(FACTORY, path[0], path[1]), amounts[0]);
     }
 
-    function swapOneWBNBToBUSD2() external{
-        uint amount = 1 ether;
-        address[] memory path = new address[](2);
-        path[0] = wBNB;
-        path[1] = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56; 
-        uint[] memory amounts = PancakeLibrary.getAmountsOut(FACTORY, amount, path);
-        emit SwapOneWBNBToUSDT(amounts[0], amounts[1]);
-       // IERC20(path[0]).transfer(PancakeLibrary.pairFor(FACTORY, path[0], path[1]), amounts[0]);
-    }
+   
+
+    // function swapOneWBNBToBUSD2() external{
+    //     uint amount = 1 ether;
+    //     address[] memory path = new address[](2);
+    //     path[0] = wBNB;
+    //     path[1] = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56; 
+    //     uint[] memory amounts = PancakeLibrary.getAmountsOut(FACTORY, amount, path);
+    //     emit SwapOneWBNBToUSDT(amounts[0], amounts[1]);
+    //     IERC20(path[0]).transfer(PancakeLibrary.pairFor(FACTORY, path[0], path[1]), amounts[0]);
+    // }
 
     function depositOneBNB() external{
         uint amount = 1 ether;
