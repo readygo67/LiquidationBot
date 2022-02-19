@@ -1322,6 +1322,27 @@ func TestCalculateSeizedTokenCase3(t *testing.T) {
 	sync.calculateSeizedTokenAmount(&liquidation)
 }
 
+func TestCalculateSeizedTokenCase3_2(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
+	liquidation := Liquidation{
+		Address: common.HexToAddress("0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7"),
+	}
+	sync.calculateSeizedTokenAmount(&liquidation)
+}
+
 /*
 === RUN   TestCalculateSeizedTokenCase4
 asset:{Symbol:vBNB CollateralFactor:0.8 Balance:136395185712813.2920264671058733 Collateral:109116148570250.6336211736846987 Loan:0 Price:418480300000000000000 ExchangeRate:215277255419632591873262216}, address:0xA07c5b74C9B40447a954e1466938b865b6BBea36

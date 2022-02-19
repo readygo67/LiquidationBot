@@ -87,6 +87,22 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         tokens:["0xf508fCD89b8bd15579dc79A6827cB4686A3592c8","0xf508fCD89b8bd15579dc79A6827cB4686A3592c8","0x2170ed0880ac9a755fd29b2688956bd959f933f8","0x2170ed0880ac9a755fd29b2688956bd959f933f8","0xFAbE4C180b6eDad32eA0Cf56587c54417189e422"]
         9834830202498401
 
+    case3.2 
+        height15388380, account:0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7, repaySmbol:vUSDC, flashLoanFrom:0xd99c7F6C65857AC913a8f880A4cb84032AB2FC5b, repayAddress:0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8, repayUnderlyingAddress:0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d, repayValue:27875656832324521765, repayAmount:27875656832324521665 seizedSymbol:vBUSD, seizedAddress:0x95c78222B3D6e262426483D42CfA53685A67Ab9D, seizdUnderLyingAddress:0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56, seizedCTokenAmount:143366664204, seizedUnderlyingTokenAmount:30658685446757581717.6406142787506641, seizedUnderlyingTokenValue:30655144368588481216.9522267878014684
+        calculateSeizedTokenAmount case3: seizedSymbol != repaySymbol and seizedSymbol stable coin, account:0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7, seizedsymbol:vBUSD, seizedAmount:30658685446757581717.6406142787506641, repaySymbol:vUSDC, returnAmout:27997811440202175958, remain:2660874006555405759.6406142787506641, gasFee:1810129275000000000, profit:0.8504374006076486
+        case3, profitable liquidation catched:&{0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7 0.8521012456278481 15388152 0001-01-01 00:00:00 +0000 UTC}, profit:0.8504374006076486
+
+        height15389554, account:0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7, repaySmbol:vUSDC, flashLoanFrom:0xd99c7F6C65857AC913a8f880A4cb84032AB2FC5b, repayAddress:0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8, repayUnderlyingAddress:0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d, repayValue:27881310335693400929.8264930425, repayAmount:27875749151613403107 seizedSymbol:vBUSD, seizedAddress:0x95c78222B3D6e262426483D42CfA53685A67Ab9D, seizdUnderLyingAddress:0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56, seizedCTokenAmount:143329287422, seizedUnderlyingTokenAmount:30650742578021726843.1043069129706002, seizedUnderlyingTokenValue:30642941964035620313.6227368668612492
+        calculateSeizedTokenAmount case3: seizedSymbol != repaySymbol and seizedSymbol stable coin, account:0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7, seizedsymbol:vBUSD, seizedAmount:30650742578021726843.1043069129706002, repaySymbol:vUSDC, returnAmout:28004952292533076338, remain:2645790285488650505.1043069129706002, gasFee:1808003475000000000, profit:0.8371134568609936
+
+        14926847391202739147
+        27875749151613403107
+
+        0xd99c7F6C65857AC913a8f880A4cb84032AB2FC5b
+        path1:["0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56","0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"]
+        path2:["0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56","0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"]
+        tokens:["0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8","0x95c78222B3D6e262426483D42CfA53685A67Ab9D","0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56","0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d","0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7"]
+
     */
     function qingsuan(uint _situation, address _flashLoanFrom, address [] calldata  _path1,  address [] calldata  _path2,address [] calldata  _tokens, uint _flashLoanAmount) external {
         require(_situation>=1&&_situation<=7,"wrong si");
@@ -95,7 +111,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
             (,,uint shortfall) = Comptroller(ComptrollerAddr).getAccountLiquidity(_tokens[4]);
             require(shortfall > 0, "shortfall must greater than zer 0");
 
-            uint borrowBalanceStored = VTokenInterface(_tokens[1]).borrowBalanceStored(_tokens[4]);
+            uint borrowBalanceStored = VTokenInterface(_tokens[0]).borrowBalanceStored(_tokens[4]);
             uint closeFactor = Comptroller(ComptrollerAddr).closeFactorMantissa();
             uint maxAllowedRepayAmount = (borrowBalanceStored * closeFactor)/ 1e18;
             require(_flashLoanAmount < maxAllowedRepayAmount, "flashloanAmount must be less than maxAllowedRepayAmount");
@@ -204,13 +220,13 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
             }else{
                 // case3.2 seizedToken is USDT, repayToken is wETH
                 (vars.seizedVTokenAmount, ) = getSeizedVToken(vars.tokens[0], vars.tokens[1], vars.tokens[4], vars.repayAmount);
-                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedVTokenAmount);
+                //vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedVTokenAmount);
 
-                // change part of USDT to flashLoanReturnAmount wETH for returning flashloan later
-                amounts = chainSwapExactOut(vars.flashLoanReturnAmount, vars.path1, address(this));
-                require(vars.seizedUnderlyingAmount > amounts[0], "3.2-bnb-no-extra");
+                // // change part of USDT to flashLoanReturnAmount wETH for returning flashloan later
+                // amounts = chainSwapExactOut(vars.flashLoanReturnAmount, vars.path1, address(this));
+                // require(vars.seizedUnderlyingAmount > amounts[0], "3.2-bnb-no-extra");
 
-                vars.massProfit = vars.seizedUnderlyingAmount - amounts[0];
+                // vars.massProfit = vars.seizedUnderlyingAmount - amounts[0];
             }
         }else if(vars.situation==4){
             require(isStableCoin(vars.tokens[0]), "4-repayToken is not stable coin");
