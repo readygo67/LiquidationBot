@@ -22,6 +22,10 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
     mapping(address => mapping(address => bool)) approves;
 
     event Scenario(uint scenarioNo, address repayUnderlyingToken, uint repayAmount, address seizedUnderlyingToken, uint flashLoanReturnAmount,uint seizedUnderlyingAmount, uint massProfit);
+    event SeizedVTokenAmount(uint, uint, uint);
+    event SeizedUnderlyingTokenAmount(uint, uint);
+    event NotEnoughSeizedUnderlygingAmount(uint, uint);
+
     event Withdraw(address indexed, address indexed, uint);
     event WithdrawETH(address indexed, uint);
     event Qingsuan(uint, uint);
@@ -66,9 +70,24 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
     // [3] - _flashloanTokenUnderlying 借的钱的underlying
     // [4] - target 目标账号
     //_flashLoanAmount ： 借多少？ 还多少？
-    // 0x16b9a82891338f9bA80E2D6970FddA79D1eb0daE
-    // ["0xfD5840Cd36d94D7229439859C0112a4185BC0255","0xfD5840Cd36d94D7229439859C0112a4185BC0255","0x55d398326f99059fF775485246999027B3197955","0x55d398326f99059fF775485246999027B3197955","0x564EE8bF0bA977A1ccc92fe3D683AbF4569c9f5E"]
-    //1000000000000000000
+    /*
+    case1 
+       0x16b9a82891338f9bA80E2D6970FddA79D1eb0daE
+       ["0xfD5840Cd36d94D7229439859C0112a4185BC0255","0xfD5840Cd36d94D7229439859C0112a4185BC0255","0x55d398326f99059fF775485246999027B3197955","0x55d398326f99059fF775485246999027B3197955","0x564EE8bF0bA977A1ccc92fe3D683AbF4569c9f5E"]
+       21034205123917372652
+
+    case2.2 
+        height15379782, account:0xFAbE4C180b6eDad32eA0Cf56587c54417189e422, repaySmbol:vETH, flashLoanFrom:0x74E4716E431f45807DCF19f284c7aA99F18a4fbc, repayAddress:0xf508fCD89b8bd15579dc79A6827cB4686A3592c8, repayValue:27760775212595059202.7, repayAmount:9834830202498401 seizedSymbol:vETH, seizedAddress:0xf508fCD89b8bd15579dc79A6827cB4686A3592c8, seizedCTokenAmount:53542165, seizedUnderlyingTokenAmount:10818313118937201.583675475128906, seizedUnderlyingTokenValue:30536852440824038910.2407636463629662
+        calculateSeizedTokenAmount case2: seizedSymbol == repaySymbol and symbol is not stable coin, account:0xFAbE4C180b6eDad32eA0Cf56587c54417189e422, symbol:vETH, seizedAmount:10818313118937201.583675475128906, returnAmout:9859478899747771, usdtAmount:2702645379426654958, gasFee:2425666800000000000, profit:0.2786001639516656
+        case2, profitable liquidation catched:&{0xFAbE4C180b6eDad32eA0Cf56587c54417189e422 0.9512268623785098 15379543 0001-01-01 00:00:00 +0000 UTC}, profit:0.2786001639516656
+
+        0x74E4716E431f45807DCF19f284c7aA99F18a4fbc
+        path1: ["0x2170ed0880ac9a755fd29b2688956bd959f933f8","0x55d398326f99059fF775485246999027B3197955"] 
+        path2: ["0x2170ed0880ac9a755fd29b2688956bd959f933f8","0x55d398326f99059fF775485246999027B3197955"]
+        tokens:["0xf508fCD89b8bd15579dc79A6827cB4686A3592c8","0xf508fCD89b8bd15579dc79A6827cB4686A3592c8","0x2170ed0880ac9a755fd29b2688956bd959f933f8","0x2170ed0880ac9a755fd29b2688956bd959f933f8","0xFAbE4C180b6eDad32eA0Cf56587c54417189e422"]
+        9834830202498401
+
+    */
     function qingsuan(uint _situation, address _flashLoanFrom, address [] calldata  _path1,  address [] calldata  _path2,address [] calldata  _tokens, uint _flashLoanAmount) external {
         require(_situation>=1&&_situation<=7,"wrong si");
         require(_flashLoanFrom != address(0), "!pair");
@@ -145,13 +164,12 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
             vars.massProfit = vars.seizedUnderlyingAmount - vars.flashLoanReturnAmount;
         }
         else if(vars.situation==2){
-            require(vars.path1.length==0 && vars.path2.length!=0,"2.1-patherr");
             if(isVBNB(vars.tokens[0])) {
                 //case2.1 repayToken is BNB, seizedToken is BNB 
                 IWETH(wBNB).withdraw(vars.repayAmount); //change the flashLoaned wBNB to BNB.
 
                 (vars.seizedVTokenAmount, ) = getSeizedVToken(vars.tokens[0], vars.tokens[1], vars.tokens[4], vars.repayAmount);
-                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedUnderlyingAmount);
+                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedVTokenAmount);
                 require(vars.seizedUnderlyingAmount > vars.flashLoanReturnAmount,"2.1-no-extra");
 
                 IWETH(wBNB).deposit{value:vars.seizedUnderlyingAmount}(); //change BNB to wBNB
@@ -161,9 +179,9 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
                 vars.massProfit = amounts[amounts.length-1];
             }else {
                 (vars.seizedVTokenAmount, ) = getSeizedVToken(vars.tokens[0], vars.tokens[1], vars.tokens[4], vars.repayAmount);
-                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedUnderlyingAmount);
-                require(vars.seizedUnderlyingAmount > vars.flashLoanReturnAmount,"2.1-no-extra");
-
+                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedVTokenAmount);
+                require(vars.seizedUnderlyingAmount > vars.flashLoanReturnAmount,"2.2-no-extra");
+                
                 uint remain = vars.seizedUnderlyingAmount - vars.flashLoanReturnAmount;    //calculate how much ETH left after return flashloan
                 amounts = chainSwapExactIn(remain,vars.path2,address(this));  //swap the left wETH to USDT
                 vars.massProfit = amounts[amounts.length-1];
@@ -176,7 +194,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
                 IWETH(wBNB).withdraw(vars.repayAmount); //change the flashLoaned wBNB to BNB.
 
                 (vars.seizedVTokenAmount, ) = getSeizedVToken(vars.tokens[0], vars.tokens[1], vars.tokens[4], vars.repayAmount);
-                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedUnderlyingAmount);
+                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedVTokenAmount);
 
                 // change part of USDT to flashLoanReturnAmount wBNB for returning flashloan later
                 amounts =  chainSwapExactOut(vars.flashLoanReturnAmount, vars.path1, address(this));
@@ -186,7 +204,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
             }else{
                 // case3.2 seizedToken is USDT, repayToken is wETH
                 (vars.seizedVTokenAmount, ) = getSeizedVToken(vars.tokens[0], vars.tokens[1], vars.tokens[4], vars.repayAmount);
-                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedUnderlyingAmount);
+                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedVTokenAmount);
 
                 // change part of USDT to flashLoanReturnAmount wETH for returning flashloan later
                 amounts = chainSwapExactOut(vars.flashLoanReturnAmount, vars.path1, address(this));
@@ -199,7 +217,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
             if (isVBNB(vars.tokens[1])){
                 //case4.1 seizedToken is BNB, repayToken is USDT
                 (vars.seizedVTokenAmount, ) = getSeizedVToken(vars.tokens[0], vars.tokens[1], vars.tokens[4], vars.repayAmount);
-                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedUnderlyingAmount);
+                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedVTokenAmount);
 
                 IWETH(wBNB).deposit{value:vars.seizedUnderlyingAmount}();  //change BNB to wBNB
 
@@ -211,7 +229,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
             }else{
                 //case4.2 seizedToken is ETH, repayToken is USDT
                 (vars.seizedVTokenAmount, ) = getSeizedVToken(vars.tokens[0], vars.tokens[1], vars.tokens[4], vars.repayAmount);
-                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedUnderlyingAmount);
+                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedVTokenAmount);
 
                 // change all wETH to USDT
                 amounts = chainSwapExactIn(vars.seizedUnderlyingAmount, vars.path1, address(this));
@@ -224,7 +242,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
                 //case5.1 seizedToken is ETH, repayToken is BNB,
                 IWETH(wBNB).withdraw(vars.repayAmount); //change the flashLoaned wBNB to BNB.
                 (vars.seizedVTokenAmount, ) = getSeizedVToken(vars.tokens[0], vars.tokens[1], vars.tokens[4], vars.repayAmount);
-                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedUnderlyingAmount);
+                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedVTokenAmount);
 
                 //change part of wETH to flashLoanReturnAmount wBNB
                 amounts = chainSwapExactOut(vars.flashLoanReturnAmount, vars.path1, address(this));
@@ -238,7 +256,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
             }else if (isVBNB(vars.tokens[1])){
                 //case5.2 seizedToken is BNB, repayToken is ETH
                 (vars.seizedVTokenAmount, ) = getSeizedVToken(vars.tokens[0], vars.tokens[1], vars.tokens[4], vars.repayAmount);
-                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedUnderlyingAmount);
+                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedVTokenAmount);
 
                 IWETH(wBNB).deposit{value:vars.seizedUnderlyingAmount}();  //change BNB to wBNB
 
@@ -253,7 +271,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
             }else{
                 //case5.3 repayToken is wETH, seizedToken is CAKE
                 (vars.seizedVTokenAmount, ) = getSeizedVToken(vars.tokens[0], vars.tokens[1], vars.tokens[4], vars.repayAmount);
-                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedUnderlyingAmount);
+                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedVTokenAmount);
 
                 //change part of CAKE to flashLoanReturnAmount ETH for returning flashloan later
                 amounts = chainSwapExactOut(vars.flashLoanReturnAmount, vars.path1, address(this));
@@ -269,7 +287,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
             //case6 repayToken is VAI, seizedToken is USDT
             uint actualRepayAmount;
             (vars.seizedVTokenAmount, actualRepayAmount) = getSeizedVToken(vars.tokens[0], vars.tokens[1], vars.tokens[4], vars.repayAmount);
-            vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedUnderlyingAmount);
+            vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedVTokenAmount);
 
             // change part of USDT to flashLoanReturnAmount VAI for returning flashloan later
             uint changeAmount = vars.flashLoanReturnAmount + actualRepayAmount - vars.repayAmount;
@@ -282,7 +300,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
             if (isVBNB(vars.tokens[1])){
                 uint actualRepayAmount;
                 (vars.seizedVTokenAmount, actualRepayAmount) = getSeizedVToken(vars.tokens[0], vars.tokens[1], vars.tokens[4], vars.repayAmount);
-                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedUnderlyingAmount);
+                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedVTokenAmount);
                 IWETH(wBNB).deposit{value:vars.seizedUnderlyingAmount}();  //change BNB to wBNB
 
                 //change part of wBNB to flashLoanReturnAmount VAI
@@ -298,7 +316,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
                 //case7.2 repayToken is VAI, seizedToken is wETH
                 uint actualRepayAmount;
                 (vars.seizedVTokenAmount, actualRepayAmount) = getSeizedVToken(vars.tokens[0], vars.tokens[1], vars.tokens[4], vars.repayAmount);
-                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedUnderlyingAmount);
+                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedVTokenAmount);
 
                 //change part of wETH to flashLoanReturnAmount VAI
                 uint changeAmount = vars.flashLoanReturnAmount + actualRepayAmount - vars.repayAmount; 
@@ -338,6 +356,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
         require(seizedVTokenAmount > 0, "seized VToken amount is zero");
 
+        emit SeizedVTokenAmount(_repayAmount, actualRepayAmount, seizedVTokenAmount);
         return (seizedVTokenAmount, actualRepayAmount);
     }
 
@@ -360,6 +379,8 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         }
 
         seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
+
+        emit SeizedUnderlyingTokenAmount(_seizedVTokenAmount, seizedUnderlyingAmount);
         return seizedUnderlyingAmount;
     }
 

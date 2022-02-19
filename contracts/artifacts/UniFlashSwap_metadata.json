@@ -9,6 +9,25 @@
 				"anonymous": false,
 				"inputs": [
 					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"name": "NotEnoughSeizedUnderlygingAmount",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
 						"indexed": true,
 						"internalType": "address",
 						"name": "previousOwner",
@@ -90,6 +109,50 @@
 					}
 				],
 				"name": "Scenario",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"name": "SeizedUnderlyingTokenAmount",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"name": "SeizedVTokenAmount",
 				"type": "event"
 			},
 			{
@@ -380,11 +443,11 @@
 			]
 		},
 		"LiquidationBot/contracts/liquidator.sol": {
-			"keccak256": "0xe444646e3f5c19ac952c99ae95119d9c19e967f09062d8e81ec635f0f8235517",
+			"keccak256": "0x135efe6cc753f7be34e810ed6f588e580092e044780c7a43718f4c41b75505e4",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://db1389377257ec21b6a31b9b5e6b8fd52659efbe9cb8a0c5def193f36164b338",
-				"dweb:/ipfs/QmSUxKtXkzd8o9t3896DtKxaoH9dZh7XEUTpW7dZYk7JyV"
+				"bzz-raw://7208ace4cafdb02d297a72eb513ba0d179683c77c3b1c2bf39c5dbe2305a42e9",
+				"dweb:/ipfs/QmVt2FPxWsKizuZG5nLXTT1MYYv2tFmbMdvdbMK3vRMdYs"
 			]
 		}
 	},
