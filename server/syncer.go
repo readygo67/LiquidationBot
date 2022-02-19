@@ -1115,7 +1115,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			return err
 		}
 		repayAmount = decimal.NewFromBigInt(bigBorrowBalanceStored, 0).Mul(closeFactor).Div(EXPSACLE) //repayValue.Mul(EXPSACLE).Div(assets[repayIndex].Price)
-		repayAmount = repayAmount.Truncate(0).Sub(decimal.NewFromInt(1000))                           //to avoid TOO_MUCH_REPAY error
+		repayAmount = repayAmount.Truncate(0).Sub(decimal.NewFromInt(100))                            //to avoid TOO_MUCH_REPAY error
 
 		errCode, bigSeizedCTokenAmount, err = comptroller.LiquidateCalculateSeizeTokens(callOptions, tokens[repaySymbol].Address, tokens[seizedSymbol].Address, repayAmount.BigInt())
 		if err != nil {

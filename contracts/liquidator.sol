@@ -16,14 +16,15 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
     address private constant vDAI = 0x334b3eCB4DCa3593BCCC3c7EBD1A1C1d1780FBF1;
     address private constant ROUTER = 0x10ED43C718714eb63d5aA57B78B54704E256024E;
     address private constant VAI = 0x4BD17003473389A42DAF6a0a729f6Fdb328BbBd7;
-  
+    address private constant USDT = 0x55d398326f99059fF775485246999027B3197955;
+    uint private constant MAXUINT32 = ~uint(0);
 
     mapping(address => mapping(address => bool)) approves;
 
     event Scenario(uint scenarioNo, address repayUnderlyingToken, uint repayAmount, address seizedUnderlyingToken, uint flashLoanReturnAmount,uint seizedUnderlyingAmount, uint massProfit);
-    event Debug1(uint, address, address[], address[], address[], uint);
+    event Withdraw(address indexed, address indexed, uint);
+    event WithdrawETH(address indexed, uint);
     event Qingsuan(uint, uint);
-    event PancakeCall(address,uint);
 
     struct LocalVars {
         uint situation;
@@ -44,7 +45,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         uint massProfit;
     }
 
-    function swapOneBNBToFlashLoandUnderlyingToken(address _flashLoanUnderlyingToken) public{
+    function swapOneBNBToFlashLoandUnderlyingToken(address _flashLoanUnderlyingToken) onlyOwner public{
         uint amount = 1 ether;
          IWETH(wBNB).deposit{value: amount}();
 
@@ -53,7 +54,6 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         path[1] = _flashLoanUnderlyingToken; 
         chainSwapExactIn(amount, path, address(this));
     }
-
 
     //situcation： 情况 1-5
     //ch： 借钱用的pair地址
@@ -83,13 +83,18 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         }
 
         if (!approves[_tokens[3]][_tokens[0]]){
-            IERC20(_tokens[3]).approve(_tokens[0], ~uint(0));
+            IERC20(_tokens[3]).approve(_tokens[0], MAXUINT32);
             approves[_tokens[3]][_tokens[0]] = true;
         }
-       
-        //swapOneBNBToFlashLoandUnderlyingToken(_tokens[3]);  //make flashloan success 
 
-        uint beforeBalance = IERC20(_tokens[3]).balanceOf(address(this));
+        uint beforeBalance;
+        uint afterBalance;
+
+        if (isStableCoin(_tokens[3])){
+            beforeBalance = IERC20(_tokens[3]).balanceOf(address(this));
+        }else{
+            beforeBalance = IERC20(USDT).balanceOf(address(this));
+        }
 
         //token0，token1的顺序要确定好
         address token0 = IPancakePair(_flashLoanFrom).token0();
@@ -100,30 +105,15 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         bytes memory callbackdata = abi.encode(_situation,_flashLoanFrom,_path1,_path2,_tokens,_flashLoanAmount);
         IPancakePair(_flashLoanFrom).swap(amount0Out, amount1Out, address(this), callbackdata);
 
-        uint afterBalance = IERC20(_tokens[3]).balanceOf(address(this));
-        emit Qingsuan(beforeBalance, afterBalance);
+        if (isStableCoin(_tokens[3])){
+            afterBalance = IERC20(_tokens[3]).balanceOf(address(this));
+        }else{
+            afterBalance = IERC20(USDT).balanceOf(address(this));
+        }
 
+        emit Qingsuan(beforeBalance, afterBalance);
     }
 
-    // function pancakeCall(
-    //     address _sender,
-    //     uint _amount0,
-    //     uint _amount1,
-    //     bytes calldata _data
-    // ) external override{
-    //     LocalVars  memory vars;
-    //     (vars.situation,vars.flashLoanFrom, vars.path1,  vars.path2, vars.tokens, vars.repayAmount) = abi.decode(_data, (uint,address,address [],address [],address [],uint));
-    //     require(msg.sender == vars.flashLoanFrom, "!pair");
-    //     require(_sender == address(this), "!sender");
-
-    //     IERC20 repayUnderlyingToken = IERC20(vars.tokens[3]);
-
-    //     vars.flashLoanReturnAmount = vars.repayAmount + ((vars.repayAmount * 25) / 9975) + 1;
-    //     repayUnderlyingToken.transfer(vars.flashLoanFrom, vars.flashLoanReturnAmount);
-    //     emit PancakeCall(vars.flashLoanFrom, vars.flashLoanReturnAmount);
-    // }
-    
- 
     function pancakeCall(
         address _sender,
         uint _amount0,
@@ -138,15 +128,6 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
 
         vars.flashLoanReturnAmount = vars.repayAmount + ((vars.repayAmount * 25) / 9975) + 1;
         vars.borrower = vars.tokens[4];
-        ////path1： 卖的时候的path, seizedSymbol => repaySymbol的path
-        //path2:  将seizedSymbol => USDT
-        //tokens：
-        // Tokens array
-        // [0] - _flashLoanVToken 要去借的钱（要还给venus的）
-        // [1] - _seizedVToken 可以赎回来的钱
-        // [2] - _seizedTokenUnderlying 赎回来的钱的underlying
-        // [3] - _flashloanTokenUnderlying 借的钱的underlying
-        // [4] - target 目标账号
 
         IERC20 repayUnderlyingToken = IERC20(vars.tokens[3]);
         IERC20 seizedUnderlyingToken = IERC20(vars.tokens[2]);
@@ -179,7 +160,6 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
                 amounts = chainSwapExactIn(remain, vars.path2, address(this));  //swap the left wBNB to USDT
                 vars.massProfit = amounts[amounts.length-1];
             }else {
-
                 (vars.seizedVTokenAmount, ) = getSeizedVToken(vars.tokens[0], vars.tokens[1], vars.tokens[4], vars.repayAmount);
                 vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedUnderlyingAmount);
                 require(vars.seizedUnderlyingAmount > vars.flashLoanReturnAmount,"2.1-no-extra");
@@ -334,7 +314,6 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         }else{
             revert();
         }
-
         repayUnderlyingToken.transfer(vars.flashLoanFrom, vars.flashLoanReturnAmount);
         emit Scenario(vars.situation, address(repayUnderlyingToken), vars.repayAmount, address(seizedUnderlyingToken), vars.flashLoanReturnAmount, vars.seizedUnderlyingAmount, vars.massProfit);
     }
@@ -353,9 +332,8 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
             require(ok == 0, "liquidateBorrow error");
         }else{
             VTokenInterface repayVToken = VTokenInterface(_repayVToken);
-            require(repayVToken.liquidateBorrow(_borrower, _repayAmount, seizedVToken) == 0, "liquidateBorrow error "); //repay USDT, get vUSDT
+            require(repayVToken.liquidateBorrow(_borrower, _repayAmount, seizedVToken) == 0, "liquidateBorrow error"); //repay USDT, get vUSDT
         }
-
         uint afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
         uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
         require(seizedVTokenAmount > 0, "seized VToken amount is zero");
@@ -385,12 +363,25 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         return seizedUnderlyingAmount;
     }
 
+    function withdraw(address _token, address _to, uint _amount) onlyOwner external{
+        require(_token != address(0), "token must not be zero address");
+        require(_to != address(0), "to must not be zero address");
+        require(_amount >0, "amount must bigger than zero");
+
+        IERC20(_token).transfer(_to, _amount);
+        emit Withdraw(_token, _to, _amount);
+    }
+
+    function withdrawETH(address payable _to, uint _amount) onlyOwner external{
+        require(_to != address(0), "to must not be zero address");
+        require(_amount >0, "amount must bigger than zero");
+
+        _to.transfer(_amount);
+        emit WithdrawETH(_to, _amount);
+    }
+
     function chainSwapExactIn(uint amountIn, address[] memory path, address to) internal returns(uint[] memory amounts){
         amounts = PancakeLibrary.getAmountsOut(FACTORY, amountIn, path);
-        //把path0的钱撞到pair里
-        // TransferHelper.safeTransferFrom(
-        //     path[0], msg.sender, PancakeLibrary.pairFor(factory, path[0], path[1]), amounts[0]
-        // );
         IERC20(path[0]).transfer(PancakeLibrary.pairFor(FACTORY, path[0], path[1]), amounts[0]);
         _swap(amounts, path, to);
         return amounts;
@@ -399,11 +390,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
 
     function chainSwapExactOut(uint amountExactOut, address[] memory path, address to) internal returns(uint[] memory amounts) {
         amounts = PancakeLibrary.getAmountsIn(FACTORY, amountExactOut, path);
-        //把path0的钱撞到pair里
-        // TransferHelper.safeTransferFrom(
-        //     path[0], msg.sender, PancakeLibrary.pairFor(factory, path[0], path[1]), amounts[0]
-        // );
-       IERC20(path[0]).transfer(PancakeLibrary.pairFor(FACTORY, path[0], path[1]), amounts[0]);
+        IERC20(path[0]).transfer(PancakeLibrary.pairFor(FACTORY, path[0], path[1]), amounts[0]);
         _swap(amounts, path, to);
         return amounts;
     }
@@ -424,11 +411,6 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         }
     }
 
-    function withdraw(address _token, uint _amount) onlyOwner external{
-        require(_token != address(0), "address must not be zero");
-        require(_amount >0, "amount must bigger than zero");
-        IERC20(_token).transfer(msg.sender, _amount);
-    }
 
     receive() payable external{}
 
@@ -443,7 +425,5 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
     function isVAI(address _token) internal pure returns(bool){
         return (_token == VAI);
     }
-
-   
 }
 

@@ -9,49 +9,6 @@
 				"anonymous": false,
 				"inputs": [
 					{
-						"indexed": false,
-						"internalType": "uint256",
-						"name": "",
-						"type": "uint256"
-					},
-					{
-						"indexed": false,
-						"internalType": "address",
-						"name": "",
-						"type": "address"
-					},
-					{
-						"indexed": false,
-						"internalType": "address[]",
-						"name": "",
-						"type": "address[]"
-					},
-					{
-						"indexed": false,
-						"internalType": "address[]",
-						"name": "",
-						"type": "address[]"
-					},
-					{
-						"indexed": false,
-						"internalType": "address[]",
-						"name": "",
-						"type": "address[]"
-					},
-					{
-						"indexed": false,
-						"internalType": "uint256",
-						"name": "",
-						"type": "uint256"
-					}
-				],
-				"name": "Debug1",
-				"type": "event"
-			},
-			{
-				"anonymous": false,
-				"inputs": [
-					{
 						"indexed": true,
 						"internalType": "address",
 						"name": "previousOwner",
@@ -65,25 +22,6 @@
 					}
 				],
 				"name": "OwnershipTransferred",
-				"type": "event"
-			},
-			{
-				"anonymous": false,
-				"inputs": [
-					{
-						"indexed": false,
-						"internalType": "address",
-						"name": "",
-						"type": "address"
-					},
-					{
-						"indexed": false,
-						"internalType": "uint256",
-						"name": "",
-						"type": "uint256"
-					}
-				],
-				"name": "PancakeCall",
 				"type": "event"
 			},
 			{
@@ -152,6 +90,50 @@
 					}
 				],
 				"name": "Scenario",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "",
+						"type": "address"
+					},
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "",
+						"type": "address"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"name": "Withdraw",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "",
+						"type": "address"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"name": "WithdrawETH",
 				"type": "event"
 			},
 			{
@@ -274,12 +256,35 @@
 						"type": "address"
 					},
 					{
+						"internalType": "address",
+						"name": "_to",
+						"type": "address"
+					},
+					{
 						"internalType": "uint256",
 						"name": "_amount",
 						"type": "uint256"
 					}
 				],
 				"name": "withdraw",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address payable",
+						"name": "_to",
+						"type": "address"
+					},
+					{
+						"internalType": "uint256",
+						"name": "_amount",
+						"type": "uint256"
+					}
+				],
+				"name": "withdrawETH",
 				"outputs": [],
 				"stateMutability": "nonpayable",
 				"type": "function"
@@ -375,11 +380,11 @@
 			]
 		},
 		"LiquidationBot/contracts/liquidator.sol": {
-			"keccak256": "0x9e5a73cec315814980240a4b18161691b95de7b012e4a25be32f6386b7f329b4",
+			"keccak256": "0xe444646e3f5c19ac952c99ae95119d9c19e967f09062d8e81ec635f0f8235517",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://089caa511962e2db97684a642e4e22f366072e8527391e859bd94d84c6ce0347",
-				"dweb:/ipfs/QmWEJov7e42e85YrpH3BZo7Uex7GZgHBUiWq5qibTkXdTT"
+				"bzz-raw://db1389377257ec21b6a31b9b5e6b8fd52659efbe9cb8a0c5def193f36164b338",
+				"dweb:/ipfs/QmSUxKtXkzd8o9t3896DtKxaoH9dZh7XEUTpW7dZYk7JyV"
 			]
 		}
 	},
