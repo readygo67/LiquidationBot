@@ -24,11 +24,9 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
     event Scenario(uint scenarioNo, address repayUnderlyingToken, uint repayAmount, address seizedUnderlyingToken, uint flashLoanReturnAmount,uint seizedUnderlyingAmount, uint massProfit);
     event SeizedVTokenAmount(uint, uint, uint);
     event SeizedUnderlyingTokenAmount(uint, uint);
-    event NotEnoughSeizedUnderlygingAmount(uint, uint);
 
     event Withdraw(address indexed, address indexed, uint);
     event WithdrawETH(address indexed, uint);
-    event Qingsuan(uint, uint);
 
     struct LocalVars {
         uint situation;
@@ -88,17 +86,11 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         9834830202498401
 
     case3.2 
-        height15388380, account:0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7, repaySmbol:vUSDC, flashLoanFrom:0xd99c7F6C65857AC913a8f880A4cb84032AB2FC5b, repayAddress:0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8, repayUnderlyingAddress:0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d, repayValue:27875656832324521765, repayAmount:27875656832324521665 seizedSymbol:vBUSD, seizedAddress:0x95c78222B3D6e262426483D42CfA53685A67Ab9D, seizdUnderLyingAddress:0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56, seizedCTokenAmount:143366664204, seizedUnderlyingTokenAmount:30658685446757581717.6406142787506641, seizedUnderlyingTokenValue:30655144368588481216.9522267878014684
-        calculateSeizedTokenAmount case3: seizedSymbol != repaySymbol and seizedSymbol stable coin, account:0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7, seizedsymbol:vBUSD, seizedAmount:30658685446757581717.6406142787506641, repaySymbol:vUSDC, returnAmout:27997811440202175958, remain:2660874006555405759.6406142787506641, gasFee:1810129275000000000, profit:0.8504374006076486
-        case3, profitable liquidation catched:&{0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7 0.8521012456278481 15388152 0001-01-01 00:00:00 +0000 UTC}, profit:0.8504374006076486
+        calculateSeizedTokenAmount case3: seizedSymbol != repaySymbol and seizedSymbol stable coin
+        height:15391594, account:0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7, repaySymbol:vUSDC, repayUnderlyingAmount:27875946916574608303, seizedSymbol:vBUSD, seizedVTokenAmount:143329844655, seizedUnderlyingAmount:30650960029190065251.1254477794787309, seizedValue:30645088960400314010.8868557044583629, flashLoanReturnAmout:27945811445187577219, remain:2606405038873928056.1254477794787309, gasFee:2971205250000000000, profit:-0.3652994575856481
+        flashLoanFrom:0xd99c7F6C65857AC913a8f880A4cb84032AB2FC5b, path1:[0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56 0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d], path2:<nil>, addresses:[0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8 0x95c78222B3D6e262426483D42CfA53685A67Ab9D 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56 0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d 0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7]
 
-        height15389554, account:0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7, repaySmbol:vUSDC, flashLoanFrom:0xd99c7F6C65857AC913a8f880A4cb84032AB2FC5b, repayAddress:0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8, repayUnderlyingAddress:0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d, repayValue:27881310335693400929.8264930425, repayAmount:27875749151613403107 seizedSymbol:vBUSD, seizedAddress:0x95c78222B3D6e262426483D42CfA53685A67Ab9D, seizdUnderLyingAddress:0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56, seizedCTokenAmount:143329287422, seizedUnderlyingTokenAmount:30650742578021726843.1043069129706002, seizedUnderlyingTokenValue:30642941964035620313.6227368668612492
-        calculateSeizedTokenAmount case3: seizedSymbol != repaySymbol and seizedSymbol stable coin, account:0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7, seizedsymbol:vBUSD, seizedAmount:30650742578021726843.1043069129706002, repaySymbol:vUSDC, returnAmout:28004952292533076338, remain:2645790285488650505.1043069129706002, gasFee:1808003475000000000, profit:0.8371134568609936
-
-        14926847391202739147
-        27875749151613403107
-
-        0xd99c7F6C65857AC913a8f880A4cb84032AB2FC5b
+        flashLoanFrom:0xd99c7F6C65857AC913a8f880A4cb84032AB2FC5b
         path1:["0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56","0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"]
         path2:["0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56","0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"]
         tokens:["0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8","0x95c78222B3D6e262426483D42CfA53685A67Ab9D","0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56","0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d","0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7"]
@@ -122,15 +114,6 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
             approves[_tokens[3]][_tokens[0]] = true;
         }
 
-        uint beforeBalance;
-        uint afterBalance;
-
-        if (isStableCoin(_tokens[3])){
-            beforeBalance = IERC20(_tokens[3]).balanceOf(address(this));
-        }else{
-            beforeBalance = IERC20(USDT).balanceOf(address(this));
-        }
-
         //token0，token1的顺序要确定好
         address token0 = IPancakePair(_flashLoanFrom).token0();
         address token1 = IPancakePair(_flashLoanFrom).token1();
@@ -139,14 +122,6 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         uint amount1Out = _tokens[3] == token1 ? _flashLoanAmount : 0;
         bytes memory callbackdata = abi.encode(_situation,_flashLoanFrom,_path1,_path2,_tokens,_flashLoanAmount);
         IPancakePair(_flashLoanFrom).swap(amount0Out, amount1Out, address(this), callbackdata);
-
-        if (isStableCoin(_tokens[3])){
-            afterBalance = IERC20(_tokens[3]).balanceOf(address(this));
-        }else{
-            afterBalance = IERC20(USDT).balanceOf(address(this));
-        }
-
-        emit Qingsuan(beforeBalance, afterBalance);
     }
 
     function pancakeCall(
@@ -220,13 +195,13 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
             }else{
                 // case3.2 seizedToken is USDT, repayToken is wETH
                 (vars.seizedVTokenAmount, ) = getSeizedVToken(vars.tokens[0], vars.tokens[1], vars.tokens[4], vars.repayAmount);
-                //vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedVTokenAmount);
+                vars.seizedUnderlyingAmount = getSeizedUnderlyingToken(vars.tokens[1], vars.tokens[2],  vars.seizedVTokenAmount);
 
-                // // change part of USDT to flashLoanReturnAmount wETH for returning flashloan later
-                // amounts = chainSwapExactOut(vars.flashLoanReturnAmount, vars.path1, address(this));
-                // require(vars.seizedUnderlyingAmount > amounts[0], "3.2-bnb-no-extra");
+                // change part of USDT to flashLoanReturnAmount wETH for returning flashloan later
+                amounts = chainSwapExactOut(vars.flashLoanReturnAmount, vars.path1, address(this));
+                require(vars.seizedUnderlyingAmount > amounts[0], "3.2-bnb-no-extra");
 
-                // vars.massProfit = vars.seizedUnderlyingAmount - amounts[0];
+                vars.massProfit = vars.seizedUnderlyingAmount - amounts[0];
             }
         }else if(vars.situation==4){
             require(isStableCoin(vars.tokens[0]), "4-repayToken is not stable coin");

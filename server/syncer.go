@@ -1049,7 +1049,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			Price:            price,
 			ExchangeRate:     exchangeRate,
 		}
-		fmt.Printf("asset:%+v, address:%v\n", asset, tokens[asset.Symbol].Address)
+		//fmt.Printf("asset:%+v, address:%v\n", asset, tokens[asset.Symbol].Address)
 		assets = append(assets, asset)
 	}
 	totalLoan = totalLoan.Add(mintedVAIS)
@@ -1291,10 +1291,9 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 	if isStalbeCoin(seizedSymbol) {
 		//case3, collateral(i.e. seizedSymbol) is stable coin, repaySymbol may or not be a stable coin, sell part of seized symbol to repaySymbol
-		bigGas = decimal.NewFromInt(1500000)
+		bigGas = decimal.NewFromInt(2000000)
 		gasFee := decimal.NewFromBigInt(bigGasPrice, 0).Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
 
-		//paths := s.uniswapPaths[seizedSymbol+repaySymbol]
 		path1 := s.buildPaths(seizedSymbol, repaySymbol, tokens)
 		amountsIn, err := pancakeRouter.GetAmountsIn(callOptions, flashLoanReturnAmount.BigInt(), path1) //amountsIn[0] is the stablecoin needed.
 		if err != nil {
@@ -1316,7 +1315,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	} else {
 		if isStalbeCoin(repaySymbol) {
 			//case4, collateral(i.e. seizedSymbol) is not stable coin, repaySymbol is a stable coin, sell all seizedSymbol to repaySymbol
-			bigGas = decimal.NewFromInt(1500000)
+			bigGas = decimal.NewFromInt(2000000)
 			gasFee := decimal.NewFromBigInt(bigGasPrice, 0).Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
 
 			path1 := s.buildPaths(seizedSymbol, repaySymbol, tokens)
