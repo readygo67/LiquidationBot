@@ -449,6 +449,19 @@
 				"type": "function"
 			},
 			{
+				"inputs": [],
+				"name": "accrueInterest",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
 				"inputs": [
 					{
 						"internalType": "address",
@@ -573,8 +586,53 @@
 				"type": "function"
 			},
 			{
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "account",
+						"type": "address"
+					}
+				],
+				"name": "borrowBalanceStored",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
 				"inputs": [],
 				"name": "borrowRatePerBlock",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "exchangeRateCurrent",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "exchangeRateStored",
 				"outputs": [
 					{
 						"internalType": "uint256",
@@ -961,11 +1019,11 @@
 	},
 	"sources": {
 		"LiquidationBot/contracts/interface.sol": {
-			"keccak256": "0xd93fdc5b27783f6212c18dcb6b6858c4b5440072293d8f7888df88a84176076b",
+			"keccak256": "0x646b6080624524dd15efd519502f6d1f02ec3d4745f83540bff34f5416f99060",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://6d3fb47f4eb2022dd2ba0a3b6419fb5e66dc8f348a62ce0a09a19c50b3f12609",
-				"dweb:/ipfs/QmSMSTFRydQCMMYkhGNzHw5oJW3bvvCr3KWYeRWKTs6z8t"
+				"bzz-raw://f35e4e14403083edb4af6939b63b9b6df8aef2ee5bb5570834c335d19fa7c0cf",
+				"dweb:/ipfs/QmU1Rqjys4Egd81967ZicGzphzuJTNKKpqfyJZYG1BZy83"
 			]
 		}
 	},

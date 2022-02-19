@@ -66,22 +66,28 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
     // [3] - _flashloanTokenUnderlying 借的钱的underlying
     // [4] - target 目标账号
     //_flashLoanAmount ： 借多少？ 还多少？
-    // 0x58F876857a02D6762E0101bb5C46A8c1ED44Dc16
-    // ["0x95c78222B3D6e262426483D42CfA53685A67Ab9D","0x95c78222B3D6e262426483D42CfA53685A67Ab9D","0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56","0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56","0x9Dbb3fa7F18C72FDF5fa5D1eC630B0F1F191FAE6"]
+    // 0x16b9a82891338f9bA80E2D6970FddA79D1eb0daE
+    // ["0xfD5840Cd36d94D7229439859C0112a4185BC0255","0xfD5840Cd36d94D7229439859C0112a4185BC0255","0x55d398326f99059fF775485246999027B3197955","0x55d398326f99059fF775485246999027B3197955","0x564EE8bF0bA977A1ccc92fe3D683AbF4569c9f5E"]
     //1000000000000000000
     function qingsuan(uint _situation, address _flashLoanFrom, address [] calldata  _path1,  address [] calldata  _path2,address [] calldata  _tokens, uint _flashLoanAmount) external {
         require(_situation>=1&&_situation<=7,"wrong si");
         require(_flashLoanFrom != address(0), "!pair");
+        {
+            (,,uint shortfall) = Comptroller(ComptrollerAddr).getAccountLiquidity(_tokens[4]);
+            require(shortfall > 0, "shortfall must greater than zer 0");
 
-        (,,uint shortfall) = Comptroller(ComptrollerAddr).getAccountLiquidity(_tokens[4]);
-        require(shortfall > 0, "shortfall must greater than zer 0");
-        
+            uint borrowBalanceStored = VTokenInterface(_tokens[1]).borrowBalanceStored(_tokens[4]);
+            uint closeFactor = Comptroller(ComptrollerAddr).closeFactorMantissa();
+            uint maxAllowedRepayAmount = (borrowBalanceStored * closeFactor)/ 1e18;
+            require(_flashLoanAmount < maxAllowedRepayAmount, "flashloanAmount must be less than maxAllowedRepayAmount");
+        }
+
         if (!approves[_tokens[3]][_tokens[0]]){
             IERC20(_tokens[3]).approve(_tokens[0], ~uint(0));
             approves[_tokens[3]][_tokens[0]] = true;
         }
        
-        swapOneBNBToFlashLoandUnderlyingToken(_tokens[3]);  //make flashloan success 
+        //swapOneBNBToFlashLoandUnderlyingToken(_tokens[3]);  //make flashloan success 
 
         uint beforeBalance = IERC20(_tokens[3]).balanceOf(address(this));
 
@@ -141,8 +147,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         // [2] - _seizedTokenUnderlying 赎回来的钱的underlying
         // [3] - _flashloanTokenUnderlying 借的钱的underlying
         // [4] - target 目标账号
-        VTokenInterface repayVToken = VTokenInterface(vars.tokens[0]);
-        VTokenInterface seizedVToken = VTokenInterface(vars.tokens[1]);
+
         IERC20 repayUnderlyingToken = IERC20(vars.tokens[3]);
         IERC20 seizedUnderlyingToken = IERC20(vars.tokens[2]);
         uint[] memory amounts;
@@ -333,7 +338,52 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         repayUnderlyingToken.transfer(vars.flashLoanFrom, vars.flashLoanReturnAmount);
         emit Scenario(vars.situation, address(repayUnderlyingToken), vars.repayAmount, address(seizedUnderlyingToken), vars.flashLoanReturnAmount, vars.seizedUnderlyingAmount, vars.massProfit);
     }
-    
+
+
+    function getSeizedVToken(address _repayVToken,  address _seizedVToken, address _borrower, uint _repayAmount) internal returns (uint, uint){
+        VTokenInterface seizedVToken = VTokenInterface(_seizedVToken);
+        uint ok;
+        uint actualRepayAmount;
+        uint beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+
+        if (isVBNB(_repayVToken)){
+            IVBNB(_repayVToken).liquidateBorrow{value: _repayAmount}(_borrower, _seizedVToken); //repay BNB
+        } else if (isVAI(_repayVToken)){
+            (ok, actualRepayAmount) = IVAI(_repayVToken).liquidateVAI(_borrower, _repayAmount, seizedVToken);
+            require(ok == 0, "liquidateBorrow error");
+        }else{
+            VTokenInterface repayVToken = VTokenInterface(_repayVToken);
+            require(repayVToken.liquidateBorrow(_borrower, _repayAmount, seizedVToken) == 0, "liquidateBorrow error "); //repay USDT, get vUSDT
+        }
+
+        uint afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
+        uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
+        require(seizedVTokenAmount > 0, "seized VToken amount is zero");
+
+        return (seizedVTokenAmount, actualRepayAmount);
+    }
+
+    function getSeizedUnderlyingToken(address _seizedVToken, address _seizedUnderlyingToken,  uint _seizedVTokenAmount) internal returns (uint){
+        uint beforeSeizedUnderlyingAmount;
+        uint afterSeizedUnderlyingAmount;
+        uint seizedUnderlyingAmount;
+
+        if (isVBNB(_seizedVToken)){
+            beforeSeizedUnderlyingAmount = address(this).balance;
+            require(IVBNB(_seizedVToken).redeem(_seizedVTokenAmount)==0,"redeem BNB err");
+            afterSeizedUnderlyingAmount = address(this).balance;
+        }else{
+            VTokenInterface seizedVToken = VTokenInterface(_seizedVToken);
+            IERC20 seizedUnderlyingToken = IERC20(_seizedUnderlyingToken);
+
+            beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+            require(seizedVToken.redeem(_seizedVTokenAmount) == 0,"redeem error");
+            afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
+        }
+
+        seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
+        return seizedUnderlyingAmount;
+    }
 
     function chainSwapExactIn(uint amountIn, address[] memory path, address to) internal returns(uint[] memory amounts){
         amounts = PancakeLibrary.getAmountsOut(FACTORY, amountIn, path);
@@ -394,53 +444,6 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         return (_token == VAI);
     }
 
-    /*
-
-    */
-
-    function getSeizedVToken(address _repayVToken,  address _seizedVToken, address _borrower, uint _repayAmount) internal returns (uint, uint){
-        VTokenInterface seizedVToken = VTokenInterface(_seizedVToken);
-        uint ok;
-        uint actualRepayAmount;
-        uint beforeSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
-
-        if (isVBNB(_repayVToken)){
-            IVBNB(_repayVToken).liquidateBorrow{value: _repayAmount}(_borrower, _seizedVToken); //repay BNB
-        } else if (isVAI(_repayVToken)){
-            (ok, actualRepayAmount) = IVAI(_repayVToken).liquidateVAI(_borrower, _repayAmount, seizedVToken);
-            require(ok == 0, "liquidateBorrow error");
-        }else{
-            VTokenInterface repayVToken = VTokenInterface(_repayVToken);
-            require(repayVToken.liquidateBorrow(_borrower, _repayAmount, seizedVToken) == 0, "liquidateBorrow error "); //repay USDT, get vUSDT
-        }
-
-        uint afterSeizedVTokenAmount = seizedVToken.balanceOf(address(this));
-        uint seizedVTokenAmount = afterSeizedVTokenAmount - beforeSeizedVTokenAmount;
-        require(seizedVTokenAmount > 0, "seized VToken amount is zero");
-
-        return (seizedVTokenAmount, actualRepayAmount);
-    }
-
-    function getSeizedUnderlyingToken(address _seizedVToken, address _seizedUnderlyingToken,  uint _seizedVTokenAmount) internal returns (uint){
-        uint beforeSeizedUnderlyingAmount;
-        uint afterSeizedUnderlyingAmount;
-        uint seizedUnderlyingAmount;
-
-        if (isVBNB(_seizedVToken)){
-            beforeSeizedUnderlyingAmount = address(this).balance;
-            require(IVBNB(_seizedVToken).redeem(_seizedVTokenAmount)==0,"redeem BNB err");
-            afterSeizedUnderlyingAmount = address(this).balance;
-        }else{
-            VTokenInterface seizedVToken = VTokenInterface(_seizedVToken);
-            IERC20 seizedUnderlyingToken = IERC20(_seizedUnderlyingToken);
-
-            beforeSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
-            require(seizedVToken.redeem(_seizedVTokenAmount) == 0,"redeem error");
-            afterSeizedUnderlyingAmount = seizedUnderlyingToken.balanceOf(address(this));
-        }
-
-        seizedUnderlyingAmount = afterSeizedUnderlyingAmount - beforeSeizedUnderlyingAmount;
-        return seizedUnderlyingAmount;
-    }
+   
 }
 

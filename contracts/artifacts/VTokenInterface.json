@@ -50,13 +50,17 @@
 		"gasEstimates": null,
 		"methodIdentifiers": {
 			"_addReserves(uint256)": "3e941010",
+			"accrueInterest()": "a6afed95",
 			"allowance(address,address)": "dd62ed3e",
 			"approve(address,uint256)": "095ea7b3",
 			"balanceOf(address)": "70a08231",
 			"balanceOfUnderlying(address)": "3af9e669",
 			"borrow(uint256)": "c5ebeaec",
 			"borrowBalanceCurrent(address)": "17bfdfbc",
+			"borrowBalanceStored(address)": "95dd9193",
 			"borrowRatePerBlock()": "f8f9da28",
+			"exchangeRateCurrent()": "bd6d894d",
+			"exchangeRateStored()": "182df0f5",
 			"getAccountSnapshot(address)": "c37f68e2",
 			"getCash()": "3b1d21a2",
 			"liquidateBorrow(address,uint256,address)": "f5e3c462",
@@ -518,6 +522,19 @@
 			"type": "function"
 		},
 		{
+			"inputs": [],
+			"name": "accrueInterest",
+			"outputs": [
+				{
+					"internalType": "uint256",
+					"name": "",
+					"type": "uint256"
+				}
+			],
+			"stateMutability": "nonpayable",
+			"type": "function"
+		},
+		{
 			"inputs": [
 				{
 					"internalType": "address",
@@ -642,8 +659,53 @@
 			"type": "function"
 		},
 		{
+			"inputs": [
+				{
+					"internalType": "address",
+					"name": "account",
+					"type": "address"
+				}
+			],
+			"name": "borrowBalanceStored",
+			"outputs": [
+				{
+					"internalType": "uint256",
+					"name": "",
+					"type": "uint256"
+				}
+			],
+			"stateMutability": "view",
+			"type": "function"
+		},
+		{
 			"inputs": [],
 			"name": "borrowRatePerBlock",
+			"outputs": [
+				{
+					"internalType": "uint256",
+					"name": "",
+					"type": "uint256"
+				}
+			],
+			"stateMutability": "view",
+			"type": "function"
+		},
+		{
+			"inputs": [],
+			"name": "exchangeRateCurrent",
+			"outputs": [
+				{
+					"internalType": "uint256",
+					"name": "",
+					"type": "uint256"
+				}
+			],
+			"stateMutability": "nonpayable",
+			"type": "function"
+		},
+		{
+			"inputs": [],
+			"name": "exchangeRateStored",
 			"outputs": [
 				{
 					"internalType": "uint256",
