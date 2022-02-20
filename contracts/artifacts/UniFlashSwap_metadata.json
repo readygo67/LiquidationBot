@@ -9,31 +9,6 @@
 				"anonymous": false,
 				"inputs": [
 					{
-						"indexed": false,
-						"internalType": "uint256",
-						"name": "",
-						"type": "uint256"
-					},
-					{
-						"indexed": false,
-						"internalType": "uint256",
-						"name": "",
-						"type": "uint256"
-					},
-					{
-						"indexed": false,
-						"internalType": "uint256",
-						"name": "",
-						"type": "uint256"
-					}
-				],
-				"name": "AllowedRepayAmount",
-				"type": "event"
-			},
-			{
-				"anonymous": false,
-				"inputs": [
-					{
 						"indexed": true,
 						"internalType": "address",
 						"name": "previousOwner",
@@ -449,11 +424,11 @@
 			]
 		},
 		"LiquidationBot/contracts/liquidator.sol": {
-			"keccak256": "0x02d909249523701f53fb543ac8ad7c6badec35348feac29002c7166f26e8e09f",
+			"keccak256": "0x69c8280827242f5564bd4ae6faa3d3c9b5dd775644e66f5900f9b58f7132b312",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://af43632170cd1607b81d08bfe5a7540df71634aab10b6d1f13506a8b460f912c",
-				"dweb:/ipfs/QmPpNUooQjTRNksdSzLxSN1FwMJpeUVWJGSwjWPmufetTs"
+				"bzz-raw://2cb44e29fa9c5f0898c84e668b72067f72c11220bb03ff1c74299b47b2a218a9",
+				"dweb:/ipfs/QmNa8s9kNC49wcfoUeSXsBb9pqqJ9PuG1rhbQs95kruY4Y"
 			]
 		}
 	},
