@@ -30,7 +30,7 @@ var (
 
 // IQingsuanMetaData contains all meta data concerning the IQingsuan contract.
 var IQingsuanMetaData = &bind.MetaData{
-	ABI: "[{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"situation\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"ch\",\"type\":\"address\"},{\"internalType\":\"address[]\",\"name\":\"sellPath\",\"type\":\"address[]\"},{\"internalType\":\"address[]\",\"name\":\"tokens\",\"type\":\"address[]\"},{\"internalType\":\"uint256\",\"name\":\"_flashLoanAmount\",\"type\":\"uint256\"}],\"name\":\"qingsuan\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
+	ABI: "[{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"_situation\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"_flashLoanFrom\",\"type\":\"address\"},{\"internalType\":\"address[]\",\"name\":\"_path1\",\"type\":\"address[]\"},{\"internalType\":\"address[]\",\"name\":\"_path2\",\"type\":\"address[]\"},{\"internalType\":\"address[]\",\"name\":\"_tokens\",\"type\":\"address[]\"},{\"internalType\":\"uint256\",\"name\":\"_flashLoanAmount\",\"type\":\"uint256\"}],\"name\":\"qingsuan\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
 }
 
 // IQingsuanABI is the input ABI used to generate the binding from.
@@ -179,23 +179,23 @@ func (_IQingsuan *IQingsuanTransactorRaw) Transact(opts *bind.TransactOpts, meth
 	return _IQingsuan.Contract.contract.Transact(opts, method, params...)
 }
 
-// Qingsuan is a paid mutator transaction binding the contract method 0x7d43e807.
+// Qingsuan is a paid mutator transaction binding the contract method 0xb14e9a72.
 //
-// Solidity: function qingsuan(uint256 situation, address ch, address[] sellPath, address[] tokens, uint256 _flashLoanAmount) returns()
-func (_IQingsuan *IQingsuanTransactor) Qingsuan(opts *bind.TransactOpts, situation *big.Int, ch common.Address, sellPath []common.Address, tokens []common.Address, _flashLoanAmount *big.Int) (*types.Transaction, error) {
-	return _IQingsuan.contract.Transact(opts, "qingsuan", situation, ch, sellPath, tokens, _flashLoanAmount)
+// Solidity: function qingsuan(uint256 _situation, address _flashLoanFrom, address[] _path1, address[] _path2, address[] _tokens, uint256 _flashLoanAmount) returns()
+func (_IQingsuan *IQingsuanTransactor) Qingsuan(opts *bind.TransactOpts, _situation *big.Int, _flashLoanFrom common.Address, _path1 []common.Address, _path2 []common.Address, _tokens []common.Address, _flashLoanAmount *big.Int) (*types.Transaction, error) {
+	return _IQingsuan.contract.Transact(opts, "qingsuan", _situation, _flashLoanFrom, _path1, _path2, _tokens, _flashLoanAmount)
 }
 
-// Qingsuan is a paid mutator transaction binding the contract method 0x7d43e807.
+// Qingsuan is a paid mutator transaction binding the contract method 0xb14e9a72.
 //
-// Solidity: function qingsuan(uint256 situation, address ch, address[] sellPath, address[] tokens, uint256 _flashLoanAmount) returns()
-func (_IQingsuan *IQingsuanSession) Qingsuan(situation *big.Int, ch common.Address, sellPath []common.Address, tokens []common.Address, _flashLoanAmount *big.Int) (*types.Transaction, error) {
-	return _IQingsuan.Contract.Qingsuan(&_IQingsuan.TransactOpts, situation, ch, sellPath, tokens, _flashLoanAmount)
+// Solidity: function qingsuan(uint256 _situation, address _flashLoanFrom, address[] _path1, address[] _path2, address[] _tokens, uint256 _flashLoanAmount) returns()
+func (_IQingsuan *IQingsuanSession) Qingsuan(_situation *big.Int, _flashLoanFrom common.Address, _path1 []common.Address, _path2 []common.Address, _tokens []common.Address, _flashLoanAmount *big.Int) (*types.Transaction, error) {
+	return _IQingsuan.Contract.Qingsuan(&_IQingsuan.TransactOpts, _situation, _flashLoanFrom, _path1, _path2, _tokens, _flashLoanAmount)
 }
 
-// Qingsuan is a paid mutator transaction binding the contract method 0x7d43e807.
+// Qingsuan is a paid mutator transaction binding the contract method 0xb14e9a72.
 //
-// Solidity: function qingsuan(uint256 situation, address ch, address[] sellPath, address[] tokens, uint256 _flashLoanAmount) returns()
-func (_IQingsuan *IQingsuanTransactorSession) Qingsuan(situation *big.Int, ch common.Address, sellPath []common.Address, tokens []common.Address, _flashLoanAmount *big.Int) (*types.Transaction, error) {
-	return _IQingsuan.Contract.Qingsuan(&_IQingsuan.TransactOpts, situation, ch, sellPath, tokens, _flashLoanAmount)
+// Solidity: function qingsuan(uint256 _situation, address _flashLoanFrom, address[] _path1, address[] _path2, address[] _tokens, uint256 _flashLoanAmount) returns()
+func (_IQingsuan *IQingsuanTransactorSession) Qingsuan(_situation *big.Int, _flashLoanFrom common.Address, _path1 []common.Address, _path2 []common.Address, _tokens []common.Address, _flashLoanAmount *big.Int) (*types.Transaction, error) {
+	return _IQingsuan.Contract.Qingsuan(&_IQingsuan.TransactOpts, _situation, _flashLoanFrom, _path1, _path2, _tokens, _flashLoanAmount)
 }
