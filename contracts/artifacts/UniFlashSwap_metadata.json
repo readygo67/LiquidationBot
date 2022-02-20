@@ -449,11 +449,11 @@
 			]
 		},
 		"LiquidationBot/contracts/liquidator.sol": {
-			"keccak256": "0x493bd894809a595fd1fb67f332618f48c7343feb9dbbe05cdec0e62dbe2ddc80",
+			"keccak256": "0x02d909249523701f53fb543ac8ad7c6badec35348feac29002c7166f26e8e09f",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://da55b8d00d8cd80996ed4b03088e2b32a0268e37ff79a292ff13071a7cf7daf6",
-				"dweb:/ipfs/QmSpdvZwWHMPqh8waBWinhpPU1L5PtevRYbrnh8GZkt5Bj"
+				"bzz-raw://af43632170cd1607b81d08bfe5a7540df71634aab10b6d1f13506a8b460f912c",
+				"dweb:/ipfs/QmPpNUooQjTRNksdSzLxSN1FwMJpeUVWJGSwjWPmufetTs"
 			]
 		}
 	},
