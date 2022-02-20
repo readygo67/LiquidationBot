@@ -1113,7 +1113,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	var bigSeizedCTokenAmount *big.Int
 	var repayAmount decimal.Decimal
 	if repaySymbol == "VAI" {
-		repayAmount = repayValue.Truncate(0)
+		repayAmount = repayValue.Truncate(0).Sub(decimal.NewFromInt(100))
 
 		errCode, bigSeizedCTokenAmount, err = comptroller.LiquidateVAICalculateSeizeTokens(callOptions, tokens[seizedSymbol].Address, repayAmount.BigInt())
 		if err != nil {
@@ -1126,7 +1126,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 		}
 	} else {
 		bigBorrowBalanceStored, err := vbep20s[tokens[repaySymbol].Address].BorrowBalanceStored(callOptions, account)
-		fmt.Printf("repaySymbol:%v, bigBorrowBalancedStored:%v\n", repaySymbol, bigBorrowBalanceStored)
+		//fmt.Printf("repaySymbol:%v, bigBorrowBalancedStored:%v\n", repaySymbol, bigBorrowBalanceStored)
 		if err != nil {
 			fmt.Printf("calculateSeizedTokenAmount, fail to get BorrowBalanceStored, account:%v, err:%v\n", account, err)
 			return err
