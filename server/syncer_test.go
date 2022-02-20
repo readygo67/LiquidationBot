@@ -1430,7 +1430,7 @@ func TestCalculateSeizedTokenCase7(t *testing.T) {
 
 	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
 	liquidation := Liquidation{
-		Address: common.HexToAddress("0x9F7A5885051fB71c4D2a7aB4203446FaCdF65BF7"),
+		Address: common.HexToAddress("0x614146018042D47Dcde01A9400A8d14343047b67"),
 	}
 	sync.calculateSeizedTokenAmount(&liquidation)
 }

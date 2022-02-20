@@ -85,17 +85,18 @@ type Liquidation struct {
 type semaphore chan struct{}
 
 var (
-	EXPSACLE         = decimal.New(1, 18)
-	ExpScaleFloat, _ = big.NewFloat(0).SetString("1000000000000000000")
-	BigZero          = big.NewInt(0)
-	Decimal1P0, _    = decimal.NewFromString("1.0")
-	Decimal1P1, _    = decimal.NewFromString("1.1")
-	Decimal1P5, _    = decimal.NewFromString("1.5")
-	Decimal2P0, _    = decimal.NewFromString("2.0")
-	Decimal3P0, _    = decimal.NewFromString("3.0")
-	vBNBAddress      = common.HexToAddress("0xA07c5b74C9B40447a954e1466938b865b6BBea36")
-	wBNBAddress      = common.HexToAddress("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")
-	VAIAddress       = common.HexToAddress("0x4BD17003473389A42DAF6a0a729f6Fdb328BbBd7")
+	EXPSACLE             = decimal.New(1, 18)
+	ExpScaleFloat, _     = big.NewFloat(0).SetString("1000000000000000000")
+	BigZero              = big.NewInt(0)
+	Decimal1P0, _        = decimal.NewFromString("1.0")
+	Decimal1P1, _        = decimal.NewFromString("1.1")
+	Decimal1P5, _        = decimal.NewFromString("1.5")
+	Decimal2P0, _        = decimal.NewFromString("2.0")
+	Decimal3P0, _        = decimal.NewFromString("3.0")
+	vBNBAddress          = common.HexToAddress("0xA07c5b74C9B40447a954e1466938b865b6BBea36")
+	wBNBAddress          = common.HexToAddress("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")
+	VAIAddress           = common.HexToAddress("0x4BD17003473389A42DAF6a0a729f6Fdb328BbBd7")
+	VAIControllerAddress = common.HexToAddress("0x004065D34C6b18cE4370ced1CeBDE94865DbFAFE")
 )
 
 type Syncer struct {
@@ -1049,7 +1050,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			Price:            price,
 			ExchangeRate:     exchangeRate,
 		}
-		//fmt.Printf("asset:%+v, address:%v\n", asset, tokens[asset.Symbol].Address)
+		fmt.Printf("asset:%+v, address:%v\n", asset, tokens[asset.Symbol].Address)
 		assets = append(assets, asset)
 	}
 	totalLoan = totalLoan.Add(mintedVAIS)
@@ -1169,7 +1170,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 	if repaySymbol == "VAI" {
 		addresses := []common.Address{
-			VAIAddress,
+			VAIControllerAddress,
 			tokens[seizedSymbol].Address,
 			tokens[seizedSymbol].UnderlyingAddress,
 			VAIAddress,

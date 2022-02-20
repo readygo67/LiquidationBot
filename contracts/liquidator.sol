@@ -16,6 +16,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
     address private constant vDAI = 0x334b3eCB4DCa3593BCCC3c7EBD1A1C1d1780FBF1;
     address private constant ROUTER = 0x10ED43C718714eb63d5aA57B78B54704E256024E;
     address private constant VAI = 0x4BD17003473389A42DAF6a0a729f6Fdb328BbBd7;
+    address private constant VAIController = 0x004065D34C6b18cE4370ced1CeBDE94865DbFAFE;
     address private constant USDT = 0x55d398326f99059fF775485246999027B3197955;
     uint private constant MAXUINT32 = ~uint(0);
 
@@ -24,6 +25,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
     event Scenario(uint scenarioNo, address repayUnderlyingToken, uint repayAmount, address seizedUnderlyingToken, uint flashLoanReturnAmount,uint seizedUnderlyingAmount, uint massProfit);
     event SeizedVTokenAmount(uint, uint, uint);
     event SeizedUnderlyingTokenAmount(uint, uint);
+    event AllowedRepayAmount(uint, uint,uint);
 
     event Withdraw(address indexed, address indexed, uint);
     event WithdrawETH(address indexed, uint);
@@ -55,6 +57,10 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         path[0] = wBNB;
         path[1] = _flashLoanUnderlyingToken; 
         chainSwapExactIn(amount, path, address(this));
+    }
+
+    function mintedVAIS(address _account) public view returns(uint) {
+        return Comptroller(ComptrollerAddr).mintedVAIs(_account);
     }
 
     //situcation： 情况 1-5
@@ -95,6 +101,14 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         path2:["0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56","0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"]
         tokens:["0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8","0x95c78222B3D6e262426483D42CfA53685A67Ab9D","0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56","0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d","0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7"]
 
+    case7.1
+        calculateSeizedTokenAmount case7: repaySymbol is VAI and seizedSymbol is not stable coin
+        height:15394327, account:0x614146018042D47Dcde01A9400A8d14343047b67, repaySymbol:VAI, repayUnderlyingAmount:16699314059311286059, seizedSymbol:vBNB, seizedVTokenAmount:213784702, seizedUnderlyingAmount:46060855547196777.839204770526593, seizedValue:18392977079293847489.8123017221471165, flashLoanReturnAmout:16741166976753168965, remain:7689660491802316, gasFee:2994892875000000000, profit:0.0571115787242203
+        flashLoanFrom:0x3955d04E88cAa2482ab4815431e703E4d65Ec93C, => 0x133ee93FE93320e1182923E1a640912eDE17C90C
+        path1:["0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", "0x4BD17003473389A42DAF6a0a729f6Fdb328BbBd7"]
+        path2:["0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", "0x55d398326f99059fF775485246999027B3197955"]
+        addresses:["0x004065D34C6b18cE4370ced1CeBDE94865DbFAFE", "0xA07c5b74C9B40447a954e1466938b865b6BBea36", "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", "0x4BD17003473389A42DAF6a0a729f6Fdb328BbBd7", "0x614146018042D47Dcde01A9400A8d14343047b67"]
+        16699314059311286059 => 16699314059311285059
     */
     function qingsuan(uint _situation, address _flashLoanFrom, address [] calldata  _path1,  address [] calldata  _path2,address [] calldata  _tokens, uint _flashLoanAmount) external {
         require(_situation>=1&&_situation<=7,"wrong si");
@@ -103,10 +117,20 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
             (,,uint shortfall) = Comptroller(ComptrollerAddr).getAccountLiquidity(_tokens[4]);
             require(shortfall > 0, "shortfall must greater than zer 0");
 
-            uint borrowBalanceStored = VTokenInterface(_tokens[0]).borrowBalanceStored(_tokens[4]);
             uint closeFactor = Comptroller(ComptrollerAddr).closeFactorMantissa();
-            uint maxAllowedRepayAmount = (borrowBalanceStored * closeFactor)/ 1e18;
-            require(_flashLoanAmount < maxAllowedRepayAmount, "flashloanAmount must be less than maxAllowedRepayAmount");
+            uint borrowAmount;
+
+            if (_situation < 6){
+                borrowAmount = VTokenInterface(_tokens[0]).borrowBalanceStored(_tokens[4]);
+            }else{
+                borrowAmount = Comptroller(ComptrollerAddr).mintedVAIs(_tokens[4]);
+            }
+            uint maxAllowedRepayAmount = (borrowAmount * closeFactor)/ 1e18;
+            // if (_flashLoanAmount >= maxAllowedRepayAmount){
+            //     emit AllowedRepayAmount(_flashLoanAmount, borrowAmount, maxAllowedRepayAmount);
+            //     return;
+            // }
+            require(_flashLoanAmount <= maxAllowedRepayAmount, "flashloanAmount must be less than maxAllowedRepayAmount");
         }
 
         if (!approves[_tokens[3]][_tokens[0]]){
@@ -123,6 +147,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         bytes memory callbackdata = abi.encode(_situation,_flashLoanFrom,_path1,_path2,_tokens,_flashLoanAmount);
         IPancakePair(_flashLoanFrom).swap(amount0Out, amount1Out, address(this), callbackdata);
     }
+
 
     function pancakeCall(
         address _sender,
@@ -336,7 +361,7 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
 
         if (isVBNB(_repayVToken)){
             IVBNB(_repayVToken).liquidateBorrow{value: _repayAmount}(_borrower, _seizedVToken); //repay BNB
-        } else if (isVAI(_repayVToken)){
+        } else if (isVAIController(_repayVToken)){
             (ok, actualRepayAmount) = IVAI(_repayVToken).liquidateVAI(_borrower, _repayAmount, seizedVToken);
             require(ok == 0, "liquidateBorrow error");
         }else{
@@ -434,8 +459,8 @@ contract UniFlashSwap is IPancakeCallee,Ownable{
         return (_token == vBUSD || _token == vUSDT || _token == vDAI);
     }
 
-    function isVAI(address _token) internal pure returns(bool){
-        return (_token == VAI);
+    function isVAIController(address _addr) internal pure returns(bool){
+        return (_addr == VAIController);
     }
 }
 

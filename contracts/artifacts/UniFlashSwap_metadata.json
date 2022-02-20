@@ -19,9 +19,15 @@
 						"internalType": "uint256",
 						"name": "",
 						"type": "uint256"
+					},
+					{
+						"indexed": false,
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
 					}
 				],
-				"name": "NotEnoughSeizedUnderlygingAmount",
+				"name": "AllowedRepayAmount",
 				"type": "event"
 			},
 			{
@@ -41,25 +47,6 @@
 					}
 				],
 				"name": "OwnershipTransferred",
-				"type": "event"
-			},
-			{
-				"anonymous": false,
-				"inputs": [
-					{
-						"indexed": false,
-						"internalType": "uint256",
-						"name": "",
-						"type": "uint256"
-					},
-					{
-						"indexed": false,
-						"internalType": "uint256",
-						"name": "",
-						"type": "uint256"
-					}
-				],
-				"name": "Qingsuan",
 				"type": "event"
 			},
 			{
@@ -198,6 +185,25 @@
 				],
 				"name": "WithdrawETH",
 				"type": "event"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "_account",
+						"type": "address"
+					}
+				],
+				"name": "mintedVAIS",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
 			},
 			{
 				"inputs": [],
@@ -443,11 +449,11 @@
 			]
 		},
 		"LiquidationBot/contracts/liquidator.sol": {
-			"keccak256": "0x87f18196ddebee609605e1a92a7d69dd312443d9bd2497e64a61988ff92ecdbb",
+			"keccak256": "0x69df66d1c62e0ece83aa34e45919d8c98b3354d6da5d659652d0dbee9474f75c",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://8e75d0f0583b84026b0b9357ce25142921c7160d899abfc48fd12723b76d17b1",
-				"dweb:/ipfs/QmVXPcFdGGa4hTiZaUKp175wtJ5xMFvz5Zknn3FvDWRsHX"
+				"bzz-raw://9663c6f7f738d7ed392bec7b22592a51c2441c83f43ef5e55e3b4a2c1d9e630e",
+				"dweb:/ipfs/QmdyPvRLYpweTjdhWGKCFMjpTnUAj97Se5NT2FBtzQS9JH"
 			]
 		}
 	},
