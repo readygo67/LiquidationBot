@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -97,6 +98,7 @@ var (
 	wBNBAddress          = common.HexToAddress("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")
 	VAIAddress           = common.HexToAddress("0x4BD17003473389A42DAF6a0a729f6Fdb328BbBd7")
 	VAIControllerAddress = common.HexToAddress("0x004065D34C6b18cE4370ced1CeBDE94865DbFAFE")
+
 )
 
 type Syncer struct {
@@ -1115,6 +1117,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	if repaySymbol == "VAI" {
 		repayAmount = repayValue.Truncate(0).Sub(decimal.NewFromInt(100))
 
+
 		errCode, bigSeizedCTokenAmount, err = comptroller.LiquidateVAICalculateSeizeTokens(callOptions, tokens[seizedSymbol].Address, repayAmount.BigInt())
 		if err != nil {
 			fmt.Printf("calculateSeizedTokenAmount, fail to get LiquidateVAICalculateSeizeTokens, account:%v, err:%v\n", account, err)
@@ -1125,6 +1128,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			return fmt.Errorf("%v", errCode)
 		}
 	} else {
+
 		bigBorrowBalanceStored, err := vbep20s[tokens[repaySymbol].Address].BorrowBalanceStored(callOptions, account)
 		//fmt.Printf("repaySymbol:%v, bigBorrowBalancedStored:%v\n", repaySymbol, bigBorrowBalanceStored)
 		if err != nil {
@@ -1133,6 +1137,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 		}
 		repayAmount = decimal.NewFromBigInt(bigBorrowBalanceStored, 0).Mul(closeFactor).Div(EXPSACLE) //repayValue.Mul(EXPSACLE).Div(assets[repayIndex].Price)
 		repayAmount = repayAmount.Truncate(0).Sub(decimal.NewFromInt(100))                            //to avoid TOO_MUCH_REPAY error
+
 
 		errCode, bigSeizedCTokenAmount, err = comptroller.LiquidateCalculateSeizeTokens(callOptions, tokens[repaySymbol].Address, tokens[seizedSymbol].Address, repayAmount.BigInt())
 		if err != nil {
@@ -1148,37 +1153,6 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	seizedVTokenAmount := decimal.NewFromBigInt(bigSeizedCTokenAmount, 0)
 	seizedUnderlyingTokenAmount := seizedVTokenAmount.Mul(assets[seizedIndex].ExchangeRate).Div(EXPSACLE)
 	seizedUnderlyingTokenValue := seizedUnderlyingTokenAmount.Mul(assets[seizedIndex].Price).Div(EXPSACLE)
-
-	//switch repaySymbol {
-	//case "VAI":
-	//	//case 6.
-	//	//case7.1 repay VAI, capture wBNB,  swap wBNB to VAI, swap wBNB to USDT, flashLoan from VAI-USDT pair
-	//	//case7.2 repay VAI, capture wETH, swap wETH to VAI, swap wETH to USDT, flashLoan from VAI-wBNB pair
-	//	if seizedSymbol != "vBNB" {
-	//		flashLoanFrom, err = pancakeFactory.GetPair(nil, VAIAddress, tokens["vBNB"].UnderlyingAddress)
-	//	} else {
-	//		flashLoanFrom, err = pancakeFactory.GetPair(nil, VAIAddress, tokens["vUSDT"].UnderlyingAddress)
-	//	}
-	//case "vBNB":
-	//	if seizedSymbol != "vUSDT" {
-	//		flashLoanFrom, err = pancakeFactory.GetPair(nil, tokens[repaySymbol].UnderlyingAddress, tokens["vUSDT"].UnderlyingAddress)
-	//	} else {
-	//		flashLoanFrom, err = pancakeFactory.GetPair(nil, tokens[repaySymbol].UnderlyingAddress, tokens["vBUSD"].UnderlyingAddress)
-	//	}
-	//default:
-	//	if seizedSymbol != "vBNB" {
-	//		flashLoanFrom, err = pancakeFactory.GetPair(nil, tokens[repaySymbol].UnderlyingAddress, tokens["vBNB"].UnderlyingAddress)
-	//	} else {
-	//		//repay wETH, capture vUSDT,
-	//		flashLoanFrom, err = pancakeFactory.GetPair(nil, tokens[repaySymbol].UnderlyingAddress, tokens["vUSDT"].UnderlyingAddress)
-	//	}
-	//
-	//}
-	//
-	//if err != nil {
-	//	fmt.Printf("calculateSeizedTokenAmount, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
-	//	return err
-	//}
 
 	ratio := seizedUnderlyingTokenValue.Div(repayValue)
 	if ratio.Cmp(decimal.NewFromFloat32(1.11)) == 1 || ratio.Cmp(decimal.NewFromFloat32(1.09)) == -1 {
@@ -1200,6 +1174,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	ethPrice := tokens["vBNB"].Price
 
 	if repaySymbol == "VAI" {
+
 		addresses := []common.Address{
 			VAIControllerAddress,
 			tokens[seizedSymbol].Address,
@@ -1275,7 +1250,6 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			if profit.Cmp(decimal.Zero) == 1 {
 				fmt.Printf("case7: profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
 				s.doLiquidation(big.NewInt(7), flashLoanFrom, path1, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt())
-
 			}
 		}
 		return nil
@@ -1590,6 +1564,7 @@ func (s *Syncer) buildVAIPaths(srcSymbol, dstSymbol string, tokens map[string]*T
 	}
 	return nil
 }
+
 
 func (s *Syncer) selectFlashLoanFrom(repaySymbol string, path1 []common.Address, path2 []common.Address) (common.Address, error) {
 	var pair1, pair2 common.Address
