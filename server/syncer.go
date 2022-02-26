@@ -1065,7 +1065,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			Price:            price,
 			ExchangeRate:     exchangeRate,
 		}
-		//fmt.Printf("asset:%+v, address:%v\n", asset, tokens[asset.Symbol].Address)
+		fmt.Printf("asset:%+v, address:%v\n", asset, tokens[asset.Symbol].Address)
 		assets = append(assets, asset)
 	}
 	totalLoan = totalLoan.Add(mintedVAIS)
@@ -1217,7 +1217,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 				return err
 			}
 
-			bigGas = decimal.NewFromInt(1200000)
+			bigGas = decimal.NewFromInt(1500000)
 			gasFee := decimal.NewFromBigInt(bigGasPrice, 0).Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
 
 			path1 := s.buildVAIPaths(seizedSymbol, repaySymbol, tokens)
