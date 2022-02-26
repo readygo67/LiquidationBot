@@ -10,17 +10,18 @@ const HashLength = 32
 type Hash [HashLength]byte
 
 var (
-	KeyLastHandledHeight      = []byte("last_handled_height")
-	KeyBorrowerNumber         = []byte("number_of_borrowers")
-	BorrowersPrefix           = []byte("borrowers") //prefix with all borrowers
-	PricesPrefix              = []byte("prices")
-	AccountPrefix             = []byte("account")
-	MarketPrefix              = []byte("market")
-	LiquidationBelow1P0Prefix = []byte("liquidation_below_1p0")
-	LiquidationBelow1P1Prefix = []byte("liquidation_below_1p1")
-	LiquidationBelow1P5Prefix = []byte("liquidation_below_1p5")
-	LiquidationBelow2P0Prefix = []byte("liquidation_below_2p0")
-	LiquidationAbove2P0Prefix = []byte("liquidation_above_2p0")
+	KeyLastHandledHeight       = []byte("last_handled_height")
+	KeyBorrowerNumber          = []byte("number_of_borrowers")
+	BorrowersPrefix            = []byte("borrowers") //prefix with all borrowers
+	PricesPrefix               = []byte("prices")
+	AccountPrefix              = []byte("account")
+	MarketPrefix               = []byte("market")
+	LiquidationBelow1P0Prefix  = []byte("liquidation_below_1p0")
+	LiquidationBelow1P1Prefix  = []byte("liquidation_below_1p1")
+	LiquidationBelow1P5Prefix  = []byte("liquidation_below_1p5")
+	LiquidationBelow2P0Prefix  = []byte("liquidation_below_2p0")
+	LiquidationAbove2P0Prefix  = []byte("liquidation_above_2p0")
+	LiquidationNonProfitPrefix = []byte("liquidation_non_profit") //
 )
 
 func BorrowerNumberKey() []byte {

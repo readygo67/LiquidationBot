@@ -1576,6 +1576,50 @@ func TestBuildFlashLoanPool(t *testing.T) {
 	}
 }
 
+func TestFilterUSDCLiquidateBorrowEvent(t *testing.T) {
+	ctx := context.Background()
+	//cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	_, err = c.BlockNumber(ctx)
+	require.NoError(t, err)
+
+	//liquidationCh := make(chan *Liquidation, 64)
+	//priorityliquidationCh := make(chan *Liquidation, 64)
+	//feededPricesCh := make(chan *FeededPrices, 64)
+
+	//syncer := NewSyncer(c, nil, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
+	//
+	topicLiquidateBorrow := common.HexToHash("0x298637f684da70674f26509b10f07ec2fbc77a335ab1e7d6215a4b2484d8bb52")
+
+	//var addresses []common.Address
+	//name := make(map[string]string)
+	//for _, token := range syncer.tokens {
+	//	addresses = append(addresses, token.Address)
+	//}
+
+	vbep20Abi, err := abi.JSON(strings.NewReader(venus.Vbep20MetaData.ABI))
+	require.NoError(t, err)
+
+	query := ethereum.FilterQuery{
+		FromBlock: big.NewInt(15513152),
+		ToBlock:   big.NewInt(15565745),
+		Addresses: []common.Address{common.HexToAddress("0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8")}, //usdc
+		Topics:    [][]common.Hash{{topicLiquidateBorrow}},
+	}
+
+	logs, err := c.FilterLogs(context.Background(), query)
+	require.NoError(t, err)
+	fmt.Printf("start Time:%v\n", time.Now())
+	for i, log := range logs {
+		var eve venus.Vbep20LiquidateBorrow
+		err = vbep20Abi.UnpackIntoInterface(&eve, "LiquidateBorrow", log.Data)
+		fmt.Printf("%v height:%v, txhash:%v, liquidator:%v borrower:%v, repayAmount:%v, collateral:%v, seizedAmount:%v\n", (i + 1), log.BlockNumber, log.TxHash, eve.Liquidator, eve.Borrower, eve.RepayAmount, eve.VTokenCollateral, eve.SeizeTokens)
+	}
+	fmt.Printf("end Time:%v\n", time.Now())
+}
+
 /*
 verify pending liquidation:&{0xFAbE4C180b6eDad32eA0Cf56587c54417189e422 0.974535755200296 15008266 2022-02-06 11:47:03.292206 +0800 CST m=+33578.787466126}
 verify pending liquidation:&{0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7 0.8819686150405764 15008266 2022-02-06 11:47:05.618654 +0800 CST m=+33581.113938293}
