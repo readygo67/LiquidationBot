@@ -1451,7 +1451,7 @@ func TestCalculateSeizedToken1(t *testing.T) {
 
 	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
 	liquidation := Liquidation{
-		Address: common.HexToAddress("0x0A88bbE6be0005E46F56aA4145c8FB863f9Df627"),
+		Address: common.HexToAddress("0x4be7Fa3a44F8E8D9c4A30FC35E163c6ed50A1A66"),
 	}
 
 	err = sync.calculateSeizedTokenAmount(&liquidation)
@@ -1603,9 +1603,52 @@ func TestFilterUSDCLiquidateBorrowEvent(t *testing.T) {
 	require.NoError(t, err)
 
 	query := ethereum.FilterQuery{
-		FromBlock: big.NewInt(15513152),
-		ToBlock:   big.NewInt(15565745),
+		FromBlock: big.NewInt(15803152),
+		ToBlock:   big.NewInt(15603526),
 		Addresses: []common.Address{common.HexToAddress("0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8")}, //usdc
+		Topics:    [][]common.Hash{{topicLiquidateBorrow}},
+	}
+
+	logs, err := c.FilterLogs(context.Background(), query)
+	require.NoError(t, err)
+	fmt.Printf("start Time:%v\n", time.Now())
+	for i, log := range logs {
+		var eve venus.Vbep20LiquidateBorrow
+		err = vbep20Abi.UnpackIntoInterface(&eve, "LiquidateBorrow", log.Data)
+		fmt.Printf("%v height:%v, txhash:%v, liquidator:%v borrower:%v, repayAmount:%v, collateral:%v, seizedAmount:%v\n", (i + 1), log.BlockNumber, log.TxHash, eve.Liquidator, eve.Borrower, eve.RepayAmount, eve.VTokenCollateral, eve.SeizeTokens)
+	}
+	fmt.Printf("end Time:%v\n", time.Now())
+}
+
+func TestFilterAllVTokensLiquidateBorrowEvent(t *testing.T) {
+	ctx := context.Background()
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	_, err = c.BlockNumber(ctx)
+	require.NoError(t, err)
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	syncer := NewSyncer(c, nil, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
+
+	topicLiquidateBorrow := common.HexToHash("0x298637f684da70674f26509b10f07ec2fbc77a335ab1e7d6215a4b2484d8bb52")
+
+	var addresses []common.Address
+	for _, token := range syncer.tokens {
+		addresses = append(addresses, token.Address)
+	}
+
+	vbep20Abi, err := abi.JSON(strings.NewReader(venus.Vbep20MetaData.ABI))
+	require.NoError(t, err)
+
+	query := ethereum.FilterQuery{
+		FromBlock: big.NewInt(15583526),
+		ToBlock:   big.NewInt(15603526),
+		Addresses: addresses, //usdc
 		Topics:    [][]common.Hash{{topicLiquidateBorrow}},
 	}
 

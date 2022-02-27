@@ -234,8 +234,9 @@ func TestOnlineCase1(t *testing.T) {
 		liquidator: liquidator,
 		PrivateKey: privateKey,
 	}
+	gasLimit := uint64(5000000)
 	//tx, err =qs.Qingsuan(auth, big.NewInt(1), flashLoanFrom, emptyPath, emptyPath, addresses, repayAmount)
-	tx, err = syncer.doLiquidation(big.NewInt(1), flashLoanFrom, emptyPath, emptyPath, addresses, repayAmount, gasPrice)
+	tx, err = syncer.doLiquidation(big.NewInt(1), flashLoanFrom, emptyPath, emptyPath, addresses, repayAmount, gasPrice, gasLimit)
 	require.NoError(t, err)
 	t.Logf("tx:%+v", tx)
 	t.Logf("qingsuan hash:%v", tx.Hash())
@@ -335,8 +336,9 @@ func TestOnlineCase2(t *testing.T) {
 		liquidator: liquidator,
 		PrivateKey: privateKey,
 	}
+	gasLimit := uint64(5000000)
 	//tx, err =qs.Qingsuan(auth, big.NewInt(1), flashLoanFrom, emptyPath, emptyPath, addresses, repayAmount)
-	tx, err = syncer.doLiquidation(big.NewInt(2), flashLoanFrom, path1, path2, addresses, repayAmount, gasPrice)
+	tx, err = syncer.doLiquidation(big.NewInt(2), flashLoanFrom, path1, path2, addresses, repayAmount, gasPrice, gasLimit)
 	require.NoError(t, err)
 	t.Logf("tx:%+v", tx)
 	t.Logf("qingsuan hash:%v", tx.Hash())
@@ -443,8 +445,9 @@ func TestOnlineCase3_2(t *testing.T) {
 		liquidator: liquidator,
 		PrivateKey: privateKey,
 	}
+	gasLimit := uint64(5000000)
 	//tx, err =qs.Qingsuan(auth, big.NewInt(1), flashLoanFrom, emptyPath, emptyPath, addresses, repayAmount)
-	tx, err = syncer.doLiquidation(big.NewInt(3), flashLoanFrom, path1, path2, addresses, repayAmount, gasPrice)
+	tx, err = syncer.doLiquidation(big.NewInt(3), flashLoanFrom, path1, path2, addresses, repayAmount, gasPrice, gasLimit)
 	require.NoError(t, err)
 	t.Logf("tx:%+v", tx)
 	t.Logf("qingsuan hash:%v", tx.Hash())
@@ -540,8 +543,9 @@ func TestOnlineCase4_2(t *testing.T) {
 		liquidator: liquidator,
 		PrivateKey: privateKey,
 	}
+	gasLimit := uint64(5000000)
 	//tx, err =qs.Qingsuan(auth, big.NewInt(1), flashLoanFrom, emptyPath, emptyPath, addresses, repayAmount)
-	tx, err = syncer.doLiquidation(big.NewInt(4), flashLoanFrom, path1, path2, addresses, repayAmount, gasPrice)
+	tx, err = syncer.doLiquidation(big.NewInt(4), flashLoanFrom, path1, path2, addresses, repayAmount, gasPrice, gasLimit)
 	require.NoError(t, err)
 	t.Logf("tx:%+v", tx)
 	t.Logf("qingsuan hash:%v", tx.Hash())
@@ -664,8 +668,9 @@ func TestOnlineCase5_2(t *testing.T) {
 		liquidator: liquidator,
 		PrivateKey: privateKey,
 	}
+	gasLimit := uint64(5000000)
 	//tx, err =qs.Qingsuan(auth, big.NewInt(1), flashLoanFrom, emptyPath, emptyPath, addresses, repayAmount)
-	tx, err = syncer.doLiquidation(big.NewInt(5), flashLoanFrom, path1, path2, addresses, repayAmount, gasPrice)
+	tx, err = syncer.doLiquidation(big.NewInt(5), flashLoanFrom, path1, path2, addresses, repayAmount, gasPrice, gasLimit)
 	require.NoError(t, err)
 	t.Logf("tx:%+v", tx)
 	t.Logf("qingsuan hash:%v", tx.Hash())
@@ -777,8 +782,9 @@ func TestOnlineCase5_3(t *testing.T) {
 		liquidator: liquidator,
 		PrivateKey: privateKey,
 	}
+	gasLimit := uint64(5000000)
 	//tx, err =qs.Qingsuan(auth, big.NewInt(1), flashLoanFrom, emptyPath, emptyPath, addresses, repayAmount)
-	tx, err = syncer.doLiquidation(big.NewInt(5), flashLoanFrom, path1, path2, addresses, repayAmount, gasPrice)
+	tx, err = syncer.doLiquidation(big.NewInt(5), flashLoanFrom, path1, path2, addresses, repayAmount, gasPrice, gasLimit)
 	require.NoError(t, err)
 	t.Logf("tx:%+v", tx)
 	t.Logf("qingsuan hash:%v", tx.Hash())
@@ -889,8 +895,9 @@ func TestOnlineCase7_2(t *testing.T) {
 		liquidator: liquidator,
 		PrivateKey: privateKey,
 	}
+	gasLimit := uint64(5000000)
 	//tx, err =qs.Qingsuan(auth, big.NewInt(1), flashLoanFrom, emptyPath, emptyPath, addresses, repayAmount)
-	tx, err = syncer.doLiquidation(big.NewInt(7), flashLoanFrom, path1, path2, addresses, repayAmount, gasPrice)
+	tx, err = syncer.doLiquidation(big.NewInt(7), flashLoanFrom, path1, path2, addresses, repayAmount, gasPrice, gasLimit)
 	require.NoError(t, err)
 	t.Logf("tx:%+v", tx)
 	t.Logf("qingsuan hash:%v", tx.Hash())

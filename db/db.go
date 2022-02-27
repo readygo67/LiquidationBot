@@ -65,6 +65,10 @@ func LiquidationAbove2P0StoreKey(address []byte) []byte {
 	return append(LiquidationAbove2P0Prefix, address...)
 }
 
+func LiquidationNonProfitStoreKey(address []byte) []byte {
+	return append(LiquidationNonProfitPrefix, address...)
+}
+
 func NewDB(path string) (*leveldb.DB, error) {
 	return leveldb.OpenFile(path, nil)
 }

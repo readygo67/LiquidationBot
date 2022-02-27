@@ -45,23 +45,28 @@ type TokenInfo struct {
 }
 
 type Asset struct {
-	Symbol  string
-	Balance decimal.Decimal
-	Loan    decimal.Decimal
+	Symbol       string
+	Balance      decimal.Decimal //vTokenAmount
+	Loan         decimal.Decimal //underlyingTokenAmount
+	BalanceValue decimal.Decimal //BalanceValue in 10^-18 USDT
+	LoanValue    decimal.Decimal //BalanceValue in 10^-18 USDT
 }
 
 type AssetWithPrice struct {
 	Symbol           string
-	CollateralFactor decimal.Decimal
 	Balance          decimal.Decimal
-	Collateral       decimal.Decimal
 	Loan             decimal.Decimal
+	CollateralFactor decimal.Decimal
+	BalanceValue     decimal.Decimal
+	CollateralValue  decimal.Decimal
+	LoanValue        decimal.Decimal
 	Price            decimal.Decimal
 	ExchangeRate     decimal.Decimal
 }
 
 type AccountInfo struct {
 	HealthFactor decimal.Decimal
+	MaxLoanValue decimal.Decimal
 	Assets       []Asset
 }
 
@@ -86,20 +91,21 @@ type Liquidation struct {
 type semaphore chan struct{}
 
 var (
-	EXPSACLE             = decimal.New(1, 18)
-	ExpScaleFloat, _     = big.NewFloat(0).SetString("1000000000000000000")
-	BigZero              = big.NewInt(0)
-	Decimal1P0, _        = decimal.NewFromString("1.0")
-	Decimal1P1, _        = decimal.NewFromString("1.1")
-	Decimal1P5, _        = decimal.NewFromString("1.5")
-	Decimal2P0, _        = decimal.NewFromString("2.0")
-	Decimal3P0, _        = decimal.NewFromString("3.0")
-	vBNBAddress          = common.HexToAddress("0xA07c5b74C9B40447a954e1466938b865b6BBea36")
-	wBNBAddress          = common.HexToAddress("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")
-	VAIAddress           = common.HexToAddress("0x4BD17003473389A42DAF6a0a729f6Fdb328BbBd7")
-	VAIControllerAddress = common.HexToAddress("0x004065D34C6b18cE4370ced1CeBDE94865DbFAFE")
-	ProfitThreshold      = decimal.New(10, 18) //20 USDT
-
+	EXPSACLE              = decimal.New(1, 18)
+	ExpScaleFloat, _      = big.NewFloat(0).SetString("1000000000000000000")
+	BigZero               = big.NewInt(0)
+	Decimal1P0, _         = decimal.NewFromString("1.0")
+	Decimal1P1, _         = decimal.NewFromString("1.1")
+	Decimal1P5, _         = decimal.NewFromString("1.5")
+	Decimal2P0, _         = decimal.NewFromString("2.0")
+	Decimal3P0, _         = decimal.NewFromString("3.0")
+	DecimalNonProfit, _   = decimal.NewFromString("255") //magicnumber for nonprofit
+	vBNBAddress           = common.HexToAddress("0xA07c5b74C9B40447a954e1466938b865b6BBea36")
+	wBNBAddress           = common.HexToAddress("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")
+	VAIAddress            = common.HexToAddress("0x4BD17003473389A42DAF6a0a729f6Fdb328BbBd7")
+	VAIControllerAddress  = common.HexToAddress("0x004065D34C6b18cE4370ced1CeBDE94865DbFAFE")
+	ProfitThreshold       = decimal.New(10, 18)                         //10 USDT
+	MaxLoanValueThreshold = ProfitThreshold.Mul(decimal.NewFromInt(20)) //200 USDT
 )
 
 type Syncer struct {
@@ -748,6 +754,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 		return err
 	}
 
+	maxLoanValue := decimal.NewFromInt(0)
 	for _, market := range markets {
 		errCode, bigBalance, bigBorrow, bigExchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
 		if err != nil {
@@ -772,9 +779,9 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 		balance := decimal.NewFromBigInt(bigBalance, 0)
 		borrow := decimal.NewFromBigInt(bigBorrow, 0)
 
-		multiplier := collateralFactor.Mul(exchangeRate).Div(EXPSACLE)
-		multiplier = multiplier.Mul(price).Div(EXPSACLE)
-		collateral := balance.Mul(multiplier).Div(EXPSACLE)
+		multiplier := price.Mul(exchangeRate).Div(EXPSACLE).Div(EXPSACLE)
+		balanceValue := balance.Mul(multiplier)
+		collateral := balanceValue.Mul(collateralFactor).Div(EXPSACLE)
 		totalCollateral = totalCollateral.Add(collateral.Truncate(0))
 
 		loan := borrow.Mul(price).Div(EXPSACLE)
@@ -782,10 +789,16 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 
 		//build account table
 		assets = append(assets, Asset{
-			Symbol:  symbol,
-			Balance: balance,
-			Loan:    borrow,
+			Symbol:       symbol,
+			Balance:      balance,
+			Loan:         borrow,
+			BalanceValue: balanceValue,
+			LoanValue:    loan,
 		})
+
+		if loan.Cmp(maxLoanValue) == 1 {
+			maxLoanValue = loan
+		}
 	}
 
 	totalLoan = totalLoan.Add(mintedVAIS)
@@ -793,12 +806,17 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 	if totalLoan.Cmp(decimal.Zero) == 1 {
 		healthFactor = totalCollateral.Div(totalLoan)
 	}
-	//fmt.Printf("accout:%v, healthFactor:%v, totalCollateral:%v, totalLoan:%v\n", account, healthFactor, totalCollateral, totalLoan)
-	//update market table and account table
+
+	if mintedVAIS.Cmp(maxLoanValue) == 1 {
+		maxLoanValue = mintedVAIS
+	}
+
 	info := AccountInfo{
 		HealthFactor: healthFactor,
+		MaxLoanValue: maxLoanValue,
 		Assets:       assets,
 	}
+	fmt.Printf("account:%v, info:%+v\n", account, info)
 	s.updateDB(account, info)
 	if healthFactor.Cmp(decimal.New(1, 0)) != 1 {
 		blockNumber, _ := s.c.BlockNumber(ctx)
@@ -1023,6 +1041,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 	for _, market := range markets {
 		errCode, bigBalance, bigBorrow, bigExchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
+		//fmt.Printf("bigBalance:%v, bigBorrow:%v, bigExchangeRate:%v\n", bigBalance, bigBorrow, bigExchangeRate)
 		if err != nil {
 			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAccountSnapshot, account:%v, err:%v\n", account, err)
 			return err
@@ -1045,7 +1064,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 		price := decimal.NewFromBigInt(bigPrice, 0)
 		exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
-		balance := decimal.NewFromBigInt(bigBalance, 0)
+		balance := decimal.NewFromBigInt(bigBalance, 0) //vToken Amount
 		borrow := decimal.NewFromBigInt(bigBorrow, 0)
 
 		symbol := symbols[market]
@@ -1061,10 +1080,12 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 		asset := AssetWithPrice{
 			Symbol:           symbol,
+			Balance:          decimal.NewFromBigInt(bigBalance, 0),
+			Loan:             decimal.NewFromBigInt(bigBorrow, 0),
 			CollateralFactor: collateralFactor.Div(EXPSACLE),
-			Balance:          balance.Mul(exchangeRate).Mul(price).Div(EXPSACLE).Div(EXPSACLE),
-			Collateral:       collateralD,
-			Loan:             loan,
+			BalanceValue:     balance.Mul(exchangeRate).Mul(price).Div(EXPSACLE).Div(EXPSACLE), //collateral value in 10^-18 USDT
+			CollateralValue:  collateralD,                                                      //collateral value considering collateralFactor, = Balance * collateralFactor
+			LoanValue:        loan,                                                             //loan value in 10^-18 USDT
 			Price:            price,
 			ExchangeRate:     exchangeRate,
 		}
@@ -1079,8 +1100,8 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	//repayIndex := math.MaxInt32
 
 	for _, asset := range assets {
-		if asset.Loan.Cmp(maxLoanValue) == 1 {
-			maxLoanValue = asset.Loan
+		if asset.LoanValue.Cmp(maxLoanValue) == 1 {
+			maxLoanValue = asset.LoanValue
 			maxLoanSymbol = asset.Symbol
 			//repayIndex = i
 		}
@@ -1092,21 +1113,21 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	}
 
 	//the closeFactor applies to only single borrowed asset
-	maxRepayValue := maxLoanValue.Mul(closeFactor).Div(EXPSACLE)
+	maxRepayValue := maxLoanValue.Mul(closeFactor).Div(EXPSACLE) //closeFactor = 0.8*10^18
 	repaySymbol := maxLoanSymbol
 
 	repayValue := decimal.NewFromInt(0)
 	seizedSymbol := ""
 	seizedIndex := 0
 	for k, asset := range assets {
-		if asset.Balance.Cmp(maxRepayValue) != -1 {
+		if asset.BalanceValue.Cmp(maxRepayValue) != -1 {
 			repayValue = maxRepayValue
 			seizedSymbol = asset.Symbol
 			seizedIndex = k
 			break
 		} else {
-			if asset.Balance.Cmp(repayValue) == 1 {
-				repayValue = asset.Balance
+			if asset.BalanceValue.Cmp(repayValue) == 1 {
+				repayValue = asset.BalanceValue
 				seizedSymbol = asset.Symbol
 				seizedIndex = k
 			}
@@ -1454,21 +1475,26 @@ func (s *Syncer) deleteAccount(account common.Address) {
 
 		healthFactor := info.HealthFactor
 		assets := info.Assets
+		maxLoanValue := info.MaxLoanValue
 
 		for _, asset := range assets {
 			db.Delete(dbm.MarketStoreKey([]byte(asset.Symbol), accountBytes), nil)
 		}
 
-		if healthFactor.Cmp(Decimal1P0) == -1 {
-			db.Delete(dbm.LiquidationBelow1P0StoreKey(accountBytes), nil)
-		} else if healthFactor.Cmp(Decimal1P1) == -1 {
-			db.Delete(dbm.LiquidationBelow1P1StoreKey(accountBytes), nil)
-		} else if healthFactor.Cmp(Decimal1P5) == -1 {
-			db.Delete(dbm.LiquidationBelow1P5StoreKey(accountBytes), nil)
-		} else if healthFactor.Cmp(Decimal2P0) == -1 {
-			db.Delete(dbm.LiquidationBelow2P0StoreKey(accountBytes), nil)
+		if maxLoanValue.Cmp(MaxLoanValueThreshold) == -1 {
+			db.Delete(dbm.LiquidationNonProfitStoreKey(accountBytes), nil)
 		} else {
-			db.Delete(dbm.LiquidationAbove2P0StoreKey(accountBytes), nil)
+			if healthFactor.Cmp(Decimal1P0) == -1 {
+				db.Delete(dbm.LiquidationBelow1P0StoreKey(accountBytes), nil)
+			} else if healthFactor.Cmp(Decimal1P1) == -1 {
+				db.Delete(dbm.LiquidationBelow1P1StoreKey(accountBytes), nil)
+			} else if healthFactor.Cmp(Decimal1P5) == -1 {
+				db.Delete(dbm.LiquidationBelow1P5StoreKey(accountBytes), nil)
+			} else if healthFactor.Cmp(Decimal2P0) == -1 {
+				db.Delete(dbm.LiquidationBelow2P0StoreKey(accountBytes), nil)
+			} else {
+				db.Delete(dbm.LiquidationAbove2P0StoreKey(accountBytes), nil)
+			}
 		}
 
 		db.Delete(dbm.AccountStoreKey(accountBytes), nil)
@@ -1479,21 +1505,26 @@ func (s *Syncer) storeAccount(account common.Address, info AccountInfo) {
 	db := s.db
 	accountBytes := account.Bytes()
 	healthFactor := info.HealthFactor
+	maxLoanValue := info.MaxLoanValue
 
 	for _, asset := range info.Assets {
 		db.Put(dbm.MarketStoreKey([]byte(asset.Symbol), accountBytes), accountBytes, nil)
 	}
 
-	if healthFactor.Cmp(Decimal1P0) == -1 {
-		db.Put(dbm.LiquidationBelow1P0StoreKey(accountBytes), accountBytes, nil)
-	} else if healthFactor.Cmp(Decimal1P1) == -1 {
-		db.Put(dbm.LiquidationBelow1P1StoreKey(accountBytes), accountBytes, nil)
-	} else if healthFactor.Cmp(Decimal1P5) == -1 {
-		db.Put(dbm.LiquidationBelow1P5StoreKey(accountBytes), accountBytes, nil)
-	} else if healthFactor.Cmp(Decimal2P0) == -1 {
-		db.Put(dbm.LiquidationBelow2P0StoreKey(accountBytes), accountBytes, nil)
+	if maxLoanValue.Cmp(MaxLoanValueThreshold) == -1 {
+		db.Put(dbm.LiquidationNonProfitStoreKey(accountBytes), accountBytes, nil)
 	} else {
-		db.Put(dbm.LiquidationAbove2P0StoreKey(accountBytes), accountBytes, nil)
+		if healthFactor.Cmp(Decimal1P0) == -1 {
+			db.Put(dbm.LiquidationBelow1P0StoreKey(accountBytes), accountBytes, nil)
+		} else if healthFactor.Cmp(Decimal1P1) == -1 {
+			db.Put(dbm.LiquidationBelow1P1StoreKey(accountBytes), accountBytes, nil)
+		} else if healthFactor.Cmp(Decimal1P5) == -1 {
+			db.Put(dbm.LiquidationBelow1P5StoreKey(accountBytes), accountBytes, nil)
+		} else if healthFactor.Cmp(Decimal2P0) == -1 {
+			db.Put(dbm.LiquidationBelow2P0StoreKey(accountBytes), accountBytes, nil)
+		} else {
+			db.Put(dbm.LiquidationAbove2P0StoreKey(accountBytes), accountBytes, nil)
+		}
 	}
 	bz, _ := json.Marshal(info)
 	db.Put(dbm.AccountStoreKey(accountBytes), bz, nil)
