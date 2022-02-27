@@ -31,9 +31,9 @@ const (
 	SyncIntervalBelow1P0 = 3 //in secs
 	SyncIntervalBelow1P1 = 15
 	SyncIntervalBelow1P5 = 150
-	SyncIntervalBelow2P0 = 300
-	SyncIntervalAbove2P0 = 600
-	SyncIntervalNoProfit = 600
+	SyncIntervalBelow2P0 = 600
+	SyncIntervalAbove2P0 = 1800
+	SyncIntervalNoProfit = 3600
 )
 
 type TokenInfo struct {
@@ -319,7 +319,7 @@ func (s *Syncer) Start() {
 	log.Info("server start")
 	fmt.Println("server start")
 
-	s.wg.Add(9)
+	s.wg.Add(10)
 	go s.syncMarketsAndPrices()
 	go s.feedPrices()
 	go s.syncAllBorrowers()
@@ -328,6 +328,7 @@ func (s *Syncer) Start() {
 	go s.syncLiquidationBelow1P5()
 	go s.syncLiquidationBelow2P0()
 	go s.syncLiquidationAbove2P0()
+	go s.syncLiquidationNonProfit()
 	go s.liqudate()
 }
 
@@ -704,6 +705,36 @@ func (s *Syncer) syncLiquidationAbove2P0() {
 
 			s.syncAccounts(accounts)
 			t.Reset(time.Second * SyncIntervalAbove2P0)
+		}
+	}
+}
+
+func (s *Syncer) syncLiquidationNonProfit() {
+	defer s.wg.Done()
+	db := s.db
+
+	t := time.NewTimer(0)
+	defer t.Stop()
+
+	count := 1
+	for {
+		select {
+		case <-s.quitCh:
+			return
+		case <-t.C:
+			fmt.Printf("%vth sync non profit account start @ %v\n", count, time.Now())
+			count++
+
+			//var accounts []common.Address
+			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationNonProfitPrefix), nil)
+			for iter.Next() {
+				account := common.BytesToAddress(iter.Value())
+				s.syncOneAccount(account)
+				//accounts = append(accounts, common.BytesToAddress(iter.Value()))
+			}
+			iter.Release()
+
+			t.Reset(time.Second * SyncIntervalNoProfit)
 		}
 	}
 }
@@ -1089,7 +1120,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			Price:            price,
 			ExchangeRate:     exchangeRate,
 		}
-		//fmt.Printf("asset:%+v, address:%v\n", asset, tokens[asset.Symbol].Address)
+		fmt.Printf("asset:%+v, address:%v\n", asset, tokens[asset.Symbol].Address)
 		assets = append(assets, asset)
 	}
 	totalLoan = totalLoan.Add(mintedVAIS)

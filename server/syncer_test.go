@@ -42,9 +42,8 @@ func TestGetvAAVEUnderlyingPrice(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	//fail to get vAAVE prices @ 20220201
 	_, err = oracle.GetUnderlyingPrice(nil, common.HexToAddress("0x26DA28954763B92139ED49283625ceCAf52C6f94"))
-	require.Equal(t, "execution reverted: REF_DATA_NOT_AVAILABLE", err.Error())
+	require.NoError(t, err)
 }
 
 func TestGetUnderlyingDecimal(t *testing.T) {
@@ -891,7 +890,7 @@ func TestSyncOneAccount1(t *testing.T) {
 	feededPricesCh := make(chan *FeededPrices, 64)
 
 	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
-	account := common.HexToAddress("0x1E73902Ab4144299DFc2ac5a3765122c02CE889f") //0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B
+	account := common.HexToAddress("0x1743F248e67c810c8851f70B39b6578f36e9dD10") //0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B
 	//accountBytes := account.Bytes()
 	err = sync.syncOneAccount(account)
 	require.NoError(t, err)
@@ -1451,7 +1450,7 @@ func TestCalculateSeizedToken1(t *testing.T) {
 
 	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
 	liquidation := Liquidation{
-		Address: common.HexToAddress("0x4be7Fa3a44F8E8D9c4A30FC35E163c6ed50A1A66"),
+		Address: common.HexToAddress("0x1743F248e67c810c8851f70B39b6578f36e9dD10"),
 	}
 
 	err = sync.calculateSeizedTokenAmount(&liquidation)
