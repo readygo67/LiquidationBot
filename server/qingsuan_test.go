@@ -913,3 +913,13 @@ func TestOnlineCase7_2(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("profit:%v\n", balance)
 }
+
+/*
+calculateSeizedTokenAmount case4: seizedSymbol is not stable coin, repaySymbol is stable coin
+height:15640495, account:0x07d1c21878C2f84BAE1DD3bA2C674d92133cc282, repaySymbol:vUSDT, repayUnderlyingAmount:503219031321544932, seizedSymbol:vBTC, seizedVTokenAmount:72367, seizedUnderlyingAmount:14622670699390.792448163923647, seizedValue:553777925741390885.6641886554171063, flashLoanReturnAmout:504480231901298177, remain:45727493804000533, gasFee:9098895939500000000, profit:-9.053147976240673
+flashLoanFrom:0x16b9a82891338f9bA80E2D6970FddA79D1eb0daE,
+path1:["0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", "0x55d398326f99059fF775485246999027B3197955"]
+path2:<nil>,
+addresses:["0xfD5840Cd36d94D7229439859C0112a4185BC0255", "0x882C173bC7Ff3b7786CA16dfeD3DFFfb9Ee7847B", "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", "0x55d398326f99059fF775485246999027B3197955", "0x07d1c21878C2f84BAE1DD3bA2C674d92133cc282"]
+
+*/

@@ -769,7 +769,6 @@ func (s *Syncer) monitorLiquidationEvent() {
 		case <-s.quitCh:
 			return
 		case <-t.C:
-			count++
 			monitorEndHeight, err := s.c.BlockNumber(context.Background())
 			if err != nil {
 				monitorEndHeight = monitorStartHeight
@@ -784,17 +783,20 @@ func (s *Syncer) monitorLiquidationEvent() {
 			}
 
 			logs, err := s.c.FilterLogs(context.Background(), query)
-			if err == nil {
+			if err != nil {
+				fmt.Printf("%vth sync monitor LiquidationBorrow event, startHeight:%v, endHeight:%v, err:%v \n", count, monitorStartHeight, monitorEndHeight, err)
+			} else {
 				for _, log := range logs {
 					var eve venus.Vbep20LiquidateBorrow
 					err = vbep20Abi.UnpackIntoInterface(&eve, "LiquidateBorrow", log.Data)
-					if err != nil {
+					if err == nil {
 						fmt.Printf("LiquidateBorrow event happen @ height:%v, txhash:%v, liquidator:%v borrower:%v, repayAmount:%v, collateral:%v, seizedAmount:%v\n", log.BlockNumber, log.TxHash, eve.Liquidator, eve.Borrower, eve.RepayAmount, eve.VTokenCollateral, eve.SeizeTokens)
 					}
 				}
 				monitorStartHeight = monitorEndHeight
+				t.Reset(time.Second * MonitorLiquidationInterval)
 			}
-			t.Reset(time.Second * MonitorLiquidationInterval)
+			count++
 		}
 	}
 }
