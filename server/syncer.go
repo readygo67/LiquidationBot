@@ -29,9 +29,9 @@ const (
 	ConfirmHeight              = 0
 	ScanSpan                   = 1000
 	SyncIntervalBelow1P0       = 3 //in secs
-	SyncIntervalBelow1P1       = 15
+	SyncIntervalBelow1P1       = 6
 	SyncIntervalBelow1P5       = 150
-	SyncIntervalBelow2P0       = 600
+	SyncIntervalBelow2P0       = 1200
 	SyncIntervalAbove2P0       = 1800
 	SyncIntervalNoProfit       = 3600
 	MonitorLiquidationInterval = 120
@@ -105,8 +105,8 @@ var (
 	wBNBAddress           = common.HexToAddress("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")
 	VAIAddress            = common.HexToAddress("0x4BD17003473389A42DAF6a0a729f6Fdb328BbBd7")
 	VAIControllerAddress  = common.HexToAddress("0x004065D34C6b18cE4370ced1CeBDE94865DbFAFE")
-	ProfitThreshold       = decimal.New(10, 18)                         //10 USDT
-	MaxLoanValueThreshold = ProfitThreshold.Mul(decimal.NewFromInt(20)) //200 USDT
+	ProfitThreshold       = decimal.New(5, 18)   //5 USDT
+	MaxLoanValueThreshold = decimal.New(100, 18) //100 USDT
 )
 
 type Syncer struct {
@@ -727,15 +727,14 @@ func (s *Syncer) syncLiquidationNonProfit() {
 			fmt.Printf("%vth sync non profit account start @ %v\n", count, time.Now())
 			count++
 
-			//var accounts []common.Address
+			var accounts []common.Address
 			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationNonProfitPrefix), nil)
 			for iter.Next() {
-				account := common.BytesToAddress(iter.Value())
-				s.syncOneAccount(account)
-				//accounts = append(accounts, common.BytesToAddress(iter.Value()))
+				accounts = append(accounts, common.BytesToAddress(iter.Value()))
 			}
-			iter.Release()
 
+			iter.Release()
+			s.syncAccounts(accounts)
 			t.Reset(time.Second * SyncIntervalNoProfit)
 		}
 	}
@@ -1275,8 +1274,8 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	ratio := seizedUnderlyingTokenValue.Div(repayValue)
 	if ratio.Cmp(decimal.NewFromFloat32(1.11)) == 1 || ratio.Cmp(decimal.NewFromFloat32(1.09)) == -1 {
 		fmt.Printf("calculated seizedUnerlyingTokenValue != 1.1, calculateRatio:%v, seizedUnderylingTokenValue:%v, repayValue:%v\n", ratio, seizedUnderlyingTokenValue, repayValue)
-		err := fmt.Errorf("calculated seizedUnerlyingTokenValue != 1.1, calculateRatio:%v, seizedUnderylingTokenValue:%v, repayValue:%v\n", ratio, seizedUnderlyingTokenValue, repayValue)
-		return err
+		//fmt.Errorf("calculated seizedUnerlyingTokenValue != 1.1, calculateRatio:%v, seizedUnderylingTokenValue:%v, repayValue:%v\n", ratio, seizedUnderlyingTokenValue, repayValue)
+		//return err
 	}
 
 	//massProfit := seizedUnderlyingTokenValue.Sub(repayValue)
@@ -1294,7 +1293,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 		bigGasPrice = big.NewInt(5)
 	}
 	gasPrice := decimal.NewFromBigInt(bigGasPrice, 0).Mul(decimal.NewFromFloat32(1)) //x1.5 gasPrice for PGA
-	gasLimt := uint64(5000000)
+	gasLimt := uint64(3000000)
 	bigGas := decimal.NewFromInt(int64(gasLimt))
 	ethPrice := tokens["vBNB"].Price
 
