@@ -914,12 +914,103 @@ func TestOnlineCase7_2(t *testing.T) {
 	t.Logf("profit:%v\n", balance)
 }
 
-/*
-calculateSeizedTokenAmount case4: seizedSymbol is not stable coin, repaySymbol is stable coin
-height:15640495, account:0x07d1c21878C2f84BAE1DD3bA2C674d92133cc282, repaySymbol:vUSDT, repayUnderlyingAmount:503219031321544932, seizedSymbol:vBTC, seizedVTokenAmount:72367, seizedUnderlyingAmount:14622670699390.792448163923647, seizedValue:553777925741390885.6641886554171063, flashLoanReturnAmout:504480231901298177, remain:45727493804000533, gasFee:9098895939500000000, profit:-9.053147976240673
-flashLoanFrom:0x16b9a82891338f9bA80E2D6970FddA79D1eb0daE,
-path1:["0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", "0x55d398326f99059fF775485246999027B3197955"]
-path2:<nil>,
-addresses:["0xfD5840Cd36d94D7229439859C0112a4185BC0255", "0x882C173bC7Ff3b7786CA16dfeD3DFFfb9Ee7847B", "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", "0x55d398326f99059fF775485246999027B3197955", "0x07d1c21878C2f84BAE1DD3bA2C674d92133cc282"]
+func TestOnlineCase4_2_1(t *testing.T) {
+	rpcURL := "http://127.0.0.1:8545"
+	expectedAddr := common.HexToAddress("0x55C032aEf9D353a5f7562ecba115f9B994147Cc1")
+	c, err := ethclient.Dial(rpcURL)
+	require.NoError(t, err)
 
-*/
+	privateKey, err := crypto.HexToECDSA("5c694ea694c13fbe230763060a16c6b5c039f8a08f2ae606e5447866f593d384")
+	require.NoError(t, err)
+
+	publicKey := privateKey.Public()
+	publicKeyECDSA, _ := publicKey.(*ecdsa.PublicKey)
+	from := crypto.PubkeyToAddress(*publicKeyECDSA)
+	nonce, err := c.PendingNonceAt(context.Background(), from)
+	require.NoError(t, err)
+
+	gasPrice, err := c.SuggestGasPrice(context.Background())
+	require.NoError(t, err)
+
+	chainID, err := c.NetworkID(context.Background())
+	require.NoError(t, err)
+
+	auth, _ := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
+	auth.Value = big.NewInt(0) // in wei
+	auth.Nonce = big.NewInt(int64(nonce))
+	auth.GasPrice = gasPrice
+	auth.GasLimit = 6000000
+
+	liquidatorAddr, tx, qs, err := DeployUniFlashSwap(auth, c)
+	require.NoError(t, err)
+	require.Equal(t, expectedAddr, liquidatorAddr)
+	t.Logf("hash:%v", tx.Hash())
+
+	owner, err := qs.Owner(nil)
+	require.NoError(t, err)
+	require.Equal(t, from, owner)
+
+	/*
+		calculateSeizedTokenAmount case5: seizedSymbol and repaySymbol are not stable coin
+		height:15651152, account:0x19d598Fa8846c46A1D94D7F4024Ed49F357C7181, repaySymbol:vBCH, repayUnderlyingAmount:30169989390770485, seizedSymbol:vBTC, seizedVTokenAmount:1340519, seizedUnderlyingAmount:270869908674815.8770540548427115, seizedValue:10402306489908816815.7462959627478293, flashLoanReturnAmout:30245603399268657, remain:25626196971772, gasFee:9199635732250000000, profit:-8.2162810108999601
+		flashLoanFrom:0xAfB3c543EBa8aFcb87b5d552C1142d9a18D375e7,
+		path1:[0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c 0x8fF795a6F4D97E7887C79beA79aba5cc76444aDf],
+		path2:[0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c 0x55d398326f99059fF775485246999027B3197955],
+		addresses:[0x5F0388EBc2B94FA8E123F404b79cCF5f40b29176 0x882C173bC7Ff3b7786CA16dfeD3DFFfb9Ee7847B 0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c 0x8fF795a6F4D97E7887C79beA79aba5cc76444aDf 0x19d598Fa8846c46A1D94D7F4024Ed49F357C7181]
+	*/
+
+	//emptyPath := []common.Address{}
+	flashLoanFrom := common.HexToAddress("0xAfB3c543EBa8aFcb87b5d552C1142d9a18D375e7")
+
+	path1 := []common.Address{
+		common.HexToAddress("0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c"),
+		common.HexToAddress("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"),
+		common.HexToAddress("0x8fF795a6F4D97E7887C79beA79aba5cc76444aDf"),
+	}
+	path2 := []common.Address{
+		common.HexToAddress("0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c"),
+		common.HexToAddress("0x55d398326f99059fF775485246999027B3197955"),
+	}
+	addresses := []common.Address{
+		common.HexToAddress("0x5F0388EBc2B94FA8E123F404b79cCF5f40b29176"),
+		common.HexToAddress("0x882C173bC7Ff3b7786CA16dfeD3DFFfb9Ee7847B"),
+		common.HexToAddress("0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c"),
+		common.HexToAddress("0x8fF795a6F4D97E7887C79beA79aba5cc76444aDf"),
+		common.HexToAddress("0x19d598Fa8846c46A1D94D7F4024Ed49F357C7181"),
+	}
+
+	repayAmount, ok := big.NewInt(0).SetString("30169989390770485", 10)
+	require.True(t, ok)
+
+	//nonce, err = c.PendingNonceAt(context.Background(), from)
+	//require.NoError(t, err)
+	//auth.Nonce = big.NewInt(int64(nonce))
+	//auth.GasLimit = 1800000
+
+	liquidator, err := venus.NewIQingsuan(liquidatorAddr, c)
+	if err != nil {
+		panic(err)
+	}
+	syncer := Syncer{
+		c:          c,
+		liquidator: liquidator,
+		PrivateKey: privateKey,
+	}
+	gasLimit := uint64(5000000)
+	//tx, err =qs.Qingsuan(auth, big.NewInt(1), flashLoanFrom, emptyPath, emptyPath, addresses, repayAmount)
+	tx, err = syncer.doLiquidation(big.NewInt(5), flashLoanFrom, path1, path2, addresses, repayAmount, gasPrice, gasLimit)
+	require.NoError(t, err)
+	t.Logf("tx:%+v", tx)
+	t.Logf("qingsuan hash:%v", tx.Hash())
+
+	got, pending, err := c.TransactionByHash(context.Background(), tx.Hash())
+	require.NoError(t, err)
+	require.False(t, pending)
+	require.Equal(t, tx.Hash(), got.Hash())
+
+	usdt, err := NewIERC20(path2[1], c)
+	require.NoError(t, err)
+	balance, err := usdt.BalanceOf(nil, liquidatorAddr)
+	require.NoError(t, err)
+	t.Logf("profit:%v\n", balance)
+}

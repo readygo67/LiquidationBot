@@ -742,6 +742,7 @@ func (s *Syncer) syncLiquidationNonProfit() {
 }
 
 func (s *Syncer) monitorLiquidationEvent() {
+	db := s.db
 	defer s.wg.Done()
 
 	t := time.NewTimer(0)
@@ -751,10 +752,13 @@ func (s *Syncer) monitorLiquidationEvent() {
 	if err != nil {
 		panic(err)
 	}
-	monitorStartHeight, err := s.c.BlockNumber(context.Background())
+
+	bz, err := db.Get(dbm.LastHandledHeightStoreKey(), nil)
 	if err != nil {
 		panic(err)
 	}
+
+	monitorStartHeight := big.NewInt(0).SetBytes(bz).Uint64()
 
 	topicLiquidateBorrow := common.HexToHash("0x298637f684da70674f26509b10f07ec2fbc77a335ab1e7d6215a4b2484d8bb52")
 
