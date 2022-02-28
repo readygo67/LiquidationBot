@@ -1603,6 +1603,50 @@ func TestFilterUSDCLiquidateBorrowEvent(t *testing.T) {
 
 	query := ethereum.FilterQuery{
 		FromBlock: big.NewInt(15803152),
+		//ToBlock:   big.NewInt(1563526),
+		Addresses: []common.Address{common.HexToAddress("0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8")}, //usdc
+		Topics:    [][]common.Hash{{topicLiquidateBorrow}},
+	}
+
+	logs, err := c.FilterLogs(context.Background(), query)
+	require.NoError(t, err)
+	fmt.Printf("start Time:%v\n", time.Now())
+	for i, log := range logs {
+		var eve venus.Vbep20LiquidateBorrow
+		err = vbep20Abi.UnpackIntoInterface(&eve, "LiquidateBorrow", log.Data)
+		fmt.Printf("%v height:%v, txhash:%v, liquidator:%v borrower:%v, repayAmount:%v, collateral:%v, seizedAmount:%v\n", (i + 1), log.BlockNumber, log.TxHash, eve.Liquidator, eve.Borrower, eve.RepayAmount, eve.VTokenCollateral, eve.SeizeTokens)
+	}
+	fmt.Printf("end Time:%v\n", time.Now())
+}
+
+func TestFilterSubscribeUSDCLiquidateBorrowEvent(t *testing.T) {
+	ctx := context.Background()
+	//cfg, err := config.New("../config.yml")
+	rpcURL := "ws://42.3.146.198:21994"
+	c, err := ethclient.Dial(rpcURL)
+
+	_, err = c.BlockNumber(ctx)
+	require.NoError(t, err)
+
+	//liquidationCh := make(chan *Liquidation, 64)
+	//priorityliquidationCh := make(chan *Liquidation, 64)
+	//feededPricesCh := make(chan *FeededPrices, 64)
+
+	//syncer := NewSyncer(c, nil, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
+	//
+	topicLiquidateBorrow := common.HexToHash("0x298637f684da70674f26509b10f07ec2fbc77a335ab1e7d6215a4b2484d8bb52")
+
+	//var addresses []common.Address
+	//name := make(map[string]string)
+	//for _, token := range syncer.tokens {
+	//	addresses = append(addresses, token.Address)
+	//}
+
+	vbep20Abi, err := abi.JSON(strings.NewReader(venus.Vbep20MetaData.ABI))
+	require.NoError(t, err)
+
+	query := ethereum.FilterQuery{
+		FromBlock: big.NewInt(15803152),
 		ToBlock:   big.NewInt(15603526),
 		Addresses: []common.Address{common.HexToAddress("0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8")}, //usdc
 		Topics:    [][]common.Hash{{topicLiquidateBorrow}},
@@ -1628,11 +1672,16 @@ func TestFilterAllVTokensLiquidateBorrowEvent(t *testing.T) {
 	_, err = c.BlockNumber(ctx)
 	require.NoError(t, err)
 
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
 	liquidationCh := make(chan *Liquidation, 64)
 	priorityliquidationCh := make(chan *Liquidation, 64)
 	feededPricesCh := make(chan *FeededPrices, 64)
 
-	syncer := NewSyncer(c, nil, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
+	syncer := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
 
 	topicLiquidateBorrow := common.HexToHash("0x298637f684da70674f26509b10f07ec2fbc77a335ab1e7d6215a4b2484d8bb52")
 
@@ -1643,23 +1692,35 @@ func TestFilterAllVTokensLiquidateBorrowEvent(t *testing.T) {
 
 	vbep20Abi, err := abi.JSON(strings.NewReader(venus.Vbep20MetaData.ABI))
 	require.NoError(t, err)
+	monitorStartHeight := uint64(15603526)
 
-	query := ethereum.FilterQuery{
-		FromBlock: big.NewInt(15583526),
-		ToBlock:   big.NewInt(15603526),
-		Addresses: addresses, //usdc
-		Topics:    [][]common.Hash{{topicLiquidateBorrow}},
-	}
+	for i := 0; i < 10; i++ {
+		monitorEndHeight, err := c.BlockNumber(context.Background())
+		if err != nil {
+			monitorEndHeight = monitorStartHeight
+		}
+		fmt.Printf("%vth sync monitor LiquidationBorrow event, startHeight:%v, endHeight:%v \n", (i + 1), monitorStartHeight, monitorEndHeight)
 
-	logs, err := c.FilterLogs(context.Background(), query)
-	require.NoError(t, err)
-	fmt.Printf("start Time:%v\n", time.Now())
-	for i, log := range logs {
-		var eve venus.Vbep20LiquidateBorrow
-		err = vbep20Abi.UnpackIntoInterface(&eve, "LiquidateBorrow", log.Data)
-		fmt.Printf("%v height:%v, txhash:%v, liquidator:%v borrower:%v, repayAmount:%v, collateral:%v, seizedAmount:%v\n", (i + 1), log.BlockNumber, log.TxHash, eve.Liquidator, eve.Borrower, eve.RepayAmount, eve.VTokenCollateral, eve.SeizeTokens)
+		query := ethereum.FilterQuery{
+			FromBlock: big.NewInt(int64(monitorStartHeight)),
+			ToBlock:   big.NewInt(int64(monitorEndHeight)),
+			Addresses: addresses, //usdc
+			Topics:    [][]common.Hash{{topicLiquidateBorrow}},
+		}
+
+		logs, err := c.FilterLogs(context.Background(), query)
+		if err == nil {
+			for _, log := range logs {
+				var eve venus.Vbep20LiquidateBorrow
+				vbep20Abi.UnpackIntoInterface(&eve, "LiquidateBorrow", log.Data)
+				fmt.Printf("LiquidateBorrow event happen @ height:%v, txhash:%v, liquidator:%v borrower:%v, repayAmount:%v, collateral:%v, seizedAmount:%v\n", log.BlockNumber, log.TxHash, eve.Liquidator, eve.Borrower, eve.RepayAmount, eve.VTokenCollateral, eve.SeizeTokens)
+			}
+
+			monitorStartHeight = monitorEndHeight
+		}
+
+		time.Sleep(30 * time.Second)
 	}
-	fmt.Printf("end Time:%v\n", time.Now())
 }
 
 /*

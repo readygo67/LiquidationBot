@@ -26,14 +26,15 @@ import (
 )
 
 const (
-	ConfirmHeight        = 0
-	ScanSpan             = 1000
-	SyncIntervalBelow1P0 = 3 //in secs
-	SyncIntervalBelow1P1 = 15
-	SyncIntervalBelow1P5 = 150
-	SyncIntervalBelow2P0 = 600
-	SyncIntervalAbove2P0 = 1800
-	SyncIntervalNoProfit = 3600
+	ConfirmHeight              = 0
+	ScanSpan                   = 1000
+	SyncIntervalBelow1P0       = 3 //in secs
+	SyncIntervalBelow1P1       = 15
+	SyncIntervalBelow1P5       = 150
+	SyncIntervalBelow2P0       = 600
+	SyncIntervalAbove2P0       = 1800
+	SyncIntervalNoProfit       = 3600
+	MonitorLiquidationInterval = 120
 )
 
 type TokenInfo struct {
@@ -319,7 +320,7 @@ func (s *Syncer) Start() {
 	log.Info("server start")
 	fmt.Println("server start")
 
-	s.wg.Add(10)
+	s.wg.Add(11)
 	go s.syncMarketsAndPrices()
 	go s.feedPrices()
 	go s.syncAllBorrowers()
@@ -329,6 +330,7 @@ func (s *Syncer) Start() {
 	go s.syncLiquidationBelow2P0()
 	go s.syncLiquidationAbove2P0()
 	go s.syncLiquidationNonProfit()
+	go s.monitorLiquidationEvent()
 	go s.liqudate()
 }
 
@@ -739,6 +741,64 @@ func (s *Syncer) syncLiquidationNonProfit() {
 	}
 }
 
+func (s *Syncer) monitorLiquidationEvent() {
+	defer s.wg.Done()
+
+	t := time.NewTimer(0)
+	defer t.Stop()
+
+	vbep20Abi, err := abi.JSON(strings.NewReader(venus.Vbep20MetaData.ABI))
+	if err != nil {
+		panic(err)
+	}
+	monitorStartHeight, err := s.c.BlockNumber(context.Background())
+	if err != nil {
+		panic(err)
+	}
+
+	topicLiquidateBorrow := common.HexToHash("0x298637f684da70674f26509b10f07ec2fbc77a335ab1e7d6215a4b2484d8bb52")
+
+	var vTokenAddresses []common.Address
+	for _, token := range s.tokens {
+		vTokenAddresses = append(vTokenAddresses, token.Address)
+	}
+
+	count := 1
+	for {
+		select {
+		case <-s.quitCh:
+			return
+		case <-t.C:
+			count++
+			monitorEndHeight, err := s.c.BlockNumber(context.Background())
+			if err != nil {
+				monitorEndHeight = monitorStartHeight
+			}
+			fmt.Printf("%vth sync monitor LiquidationBorrow event, startHeight:%v, endHeight:%v \n", count, monitorStartHeight, monitorEndHeight)
+
+			query := ethereum.FilterQuery{
+				FromBlock: big.NewInt(int64(monitorStartHeight)),
+				ToBlock:   big.NewInt(int64(monitorEndHeight)),
+				Addresses: vTokenAddresses,
+				Topics:    [][]common.Hash{{topicLiquidateBorrow}},
+			}
+
+			logs, err := s.c.FilterLogs(context.Background(), query)
+			if err == nil {
+				for _, log := range logs {
+					var eve venus.Vbep20LiquidateBorrow
+					err = vbep20Abi.UnpackIntoInterface(&eve, "LiquidateBorrow", log.Data)
+					if err != nil {
+						fmt.Printf("LiquidateBorrow event happen @ height:%v, txhash:%v, liquidator:%v borrower:%v, repayAmount:%v, collateral:%v, seizedAmount:%v\n", log.BlockNumber, log.TxHash, eve.Liquidator, eve.Borrower, eve.RepayAmount, eve.VTokenCollateral, eve.SeizeTokens)
+					}
+				}
+				monitorStartHeight = monitorEndHeight
+			}
+			t.Reset(time.Second * MonitorLiquidationInterval)
+		}
+	}
+}
+
 func (s *Syncer) syncAccounts(accounts []common.Address) {
 	var wg sync.WaitGroup
 	wg.Add(len(accounts))
@@ -847,7 +907,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 		MaxLoanValue: maxLoanValue,
 		Assets:       assets,
 	}
-	fmt.Printf("account:%v, info:%+v\n", account, info)
+	//fmt.Printf("account:%v, info:%+v\n", account, info)
 	s.updateDB(account, info)
 	if healthFactor.Cmp(decimal.New(1, 0)) != 1 {
 		blockNumber, _ := s.c.BlockNumber(ctx)
@@ -1120,11 +1180,13 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			Price:            price,
 			ExchangeRate:     exchangeRate,
 		}
-		fmt.Printf("asset:%+v, address:%v\n", asset, tokens[asset.Symbol].Address)
+		//fmt.Printf("asset:%+v, address:%v\n", asset, tokens[asset.Symbol].Address)
 		assets = append(assets, asset)
 	}
+
 	totalLoan = totalLoan.Add(mintedVAIS)
 	fmt.Printf("account:%v, totalCollateralValue:%v, mintedVAISValue:%v, totalLoanValue:%v, calculatedshortfall:%v, shorfall:%v\n", account, totalCollateral.Div(EXPSACLE), mintedVAIS.Div(EXPSACLE), totalLoan.Div(EXPSACLE), (totalLoan.Sub(totalCollateral)), shortfall)
+	fmt.Printf("account:%v, assets:%v\n", account, assets)
 	//select the repayed token and seized collateral token
 	maxLoanValue := decimal.NewFromInt(0)
 	maxLoanSymbol := ""
