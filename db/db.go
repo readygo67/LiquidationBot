@@ -22,6 +22,7 @@ var (
 	LiquidationBelow2P0Prefix  = []byte("liquidation_below_2p0")
 	LiquidationAbove2P0Prefix  = []byte("liquidation_above_2p0")
 	LiquidationNonProfitPrefix = []byte("liquidation_non_profit") //
+	BadLiquidationTxPrefix     = []byte("bad_liquidation_tx")
 )
 
 func BorrowerNumberKey() []byte {
@@ -67,6 +68,10 @@ func LiquidationAbove2P0StoreKey(address []byte) []byte {
 
 func LiquidationNonProfitStoreKey(address []byte) []byte {
 	return append(LiquidationNonProfitPrefix, address...)
+}
+
+func BadLiquidationTx(address []byte) []byte {
+	return append(BadLiquidationTxPrefix, address...)
 }
 
 func NewDB(path string) (*leveldb.DB, error) {

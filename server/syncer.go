@@ -26,15 +26,16 @@ import (
 )
 
 const (
-	ConfirmHeight              = 0
-	ScanSpan                   = 1000
-	SyncIntervalBelow1P0       = 3 //in secs
-	SyncIntervalBelow1P1       = 6
-	SyncIntervalBelow1P5       = 150
-	SyncIntervalBelow2P0       = 1200
-	SyncIntervalAbove2P0       = 1800
-	SyncIntervalNoProfit       = 3600
-	MonitorLiquidationInterval = 120
+	ConfirmHeight                    = 0
+	ScanSpan                         = 1000
+	SyncIntervalBelow1P0             = 1 //in secs
+	SyncIntervalBelow1P1             = 3
+	SyncIntervalBelow1P5             = 9
+	SyncIntervalBelow2P0             = 18
+	SyncIntervalAbove2P0             = 60
+	SyncIntervalNoProfit             = 60
+	MonitorLiquidationInterval       = 120
+	ForbiddenPeriodForBadLiquidation = 200 //200 block
 )
 
 type TokenInfo struct {
@@ -1086,6 +1087,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	pancakeRouter := s.pancakeRouter
 	pancakeFactory := s.pancakeFactory
 	account := liquidation.Address
+	db := s.db
 
 	s.m.Lock()
 	symbols := copySymbols(s.symbols)
@@ -1101,6 +1103,25 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	}
 	callOptions := &bind.CallOpts{
 		BlockNumber: big.NewInt(int64(currentHeight)),
+	}
+	has, err := db.Has(dbm.BadLiquidationTx(account.Bytes()), nil)
+	if err != nil {
+		fmt.Printf("calculateSeizedTokenAmount, fail to get BadLiquidationTx,err:%v\n", err)
+		return err
+	}
+	if has {
+		bz, err := db.Get(dbm.BadLiquidationTx(account.Bytes()), nil)
+		if err != nil {
+			fmt.Printf("calculateSeizedTokenAmount, fail to get BadLiquidationTx,err:%v\n", err)
+			return err
+		}
+
+		recordHeight := big.NewInt(0).SetBytes(bz).Uint64()
+		if currentHeight-recordHeight <= ForbiddenPeriodForBadLiquidation {
+			err = fmt.Errorf("forbidden %v liquidation temporay, currentHeight:%v, recordHeight:%v\n", account, currentHeight, recordHeight)
+			return err
+		}
+		db.Delete(dbm.BadLiquidationTx(account.Bytes()), nil)
 	}
 
 	errCode, _, shortfall, err := comptroller.GetAccountLiquidity(callOptions, account)
@@ -1334,8 +1355,11 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 				fmt.Printf("case6, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
 				tx, err := s.doLiquidation(big.NewInt(6), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
-					fmt.Printf("tx success, hash:%v", tx.Hash())
+					fmt.Printf("doLiquidation error:%v\n", err)
+					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+					return err
 				}
+				fmt.Printf("tx success, hash:%v", tx.Hash())
 			}
 		} else {
 			//case7, repay VAI and seizedSymbol is not stable coin. sell partly seizedSymbol to repay symbol, sell remain to usdt
@@ -1375,8 +1399,11 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 				fmt.Printf("case7: profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
 				tx, err := s.doLiquidation(big.NewInt(7), flashLoanFrom, path1, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
-					fmt.Printf("tx success, hash:%v", tx.Hash())
+					fmt.Printf("doLiquidation error:%v\n", err)
+					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+					return err
 				}
+				fmt.Printf("tx success, hash:%v", tx.Hash())
 			}
 		}
 		return nil
@@ -1410,8 +1437,11 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 				fmt.Printf("case1, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
 				tx, err := s.doLiquidation(big.NewInt(1), flashLoanFrom, nil, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
-					fmt.Printf("tx success, hash:%v", tx.Hash())
+					fmt.Printf("doLiquidation error:%v\n", err)
+					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+					return err
 				}
+				fmt.Printf("tx success, hash:%v", tx.Hash())
 
 			}
 		} else {
@@ -1442,8 +1472,11 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 				fmt.Printf("case2, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
 				tx, err := s.doLiquidation(big.NewInt(2), flashLoanFrom, nil, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
-					fmt.Printf("tx success, hash:%v", tx.Hash())
+					fmt.Printf("doLiquidation error:%v\n", err)
+					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+					return err
 				}
+				fmt.Printf("tx success, hash:%v", tx.Hash())
 			}
 		}
 		return nil
@@ -1476,8 +1509,11 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			fmt.Printf("case3, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
 			tx, err := s.doLiquidation(big.NewInt(3), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 			if err != nil {
-				fmt.Printf("tx success, hash:%v", tx.Hash())
+				fmt.Printf("doLiquidation error:%v\n", err)
+				db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+				return err
 			}
+			fmt.Printf("tx success, hash:%v", tx.Hash())
 		}
 	} else {
 		if isStalbeCoin(repaySymbol) {
@@ -1507,8 +1543,11 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 				fmt.Printf("case4, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
 				tx, err := s.doLiquidation(big.NewInt(4), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
-					fmt.Printf("tx success, hash:%v", tx.Hash())
+					fmt.Printf("doLiquidation error:%v\n", err)
+					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+					return err
 				}
+				fmt.Printf("tx success, hash:%v", tx.Hash())
 			}
 		} else {
 			//case5,  collateral(i.e. seizedSymbol) and repaySymbol are not stable coin. sell partly seizedSymbol to repay symbol, sell remain to usdt
@@ -1545,8 +1584,11 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 				fmt.Printf("case5: profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
 				tx, err := s.doLiquidation(big.NewInt(5), flashLoanFrom, path1, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
-					fmt.Printf("tx success, hash:%v", tx.Hash())
+					fmt.Printf("doLiquidation error:%v\n", err)
+					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+					return err
 				}
+				fmt.Printf("tx success, hash:%v", tx.Hash())
 			}
 		}
 	}
