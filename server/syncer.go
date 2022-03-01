@@ -91,8 +91,9 @@ type Liquidation struct {
 }
 
 type ConcernedAccountInfo struct {
-	Address common.Address
-	Info    AccountInfo
+	Address     common.Address
+	BlockNumber uint64
+	Info        AccountInfo
 }
 
 type semaphore chan struct{}
@@ -934,9 +935,11 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 		Assets:       assets,
 	}
 	if healthFactor.Cmp(Decimal1P1) == -1 {
+		currentHeight, _ := s.c.BlockNumber(context.Background())
 		cinfo := &ConcernedAccountInfo{
-			Address: account,
-			Info:    info,
+			Address:     account,
+			BlockNumber: currentHeight,
+			Info:        info,
 		}
 		s.concernedAccountInfoCh <- cinfo
 	}

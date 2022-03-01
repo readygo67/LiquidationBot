@@ -891,10 +891,23 @@ func TestSyncOneAccount1(t *testing.T) {
 	feededPricesCh := make(chan *FeededPrices, 64)
 
 	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
-	account := common.HexToAddress("0x1743F248e67c810c8851f70B39b6578f36e9dD10") //0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B
+	account := common.HexToAddress("0x26a27B56308FaB4ffE9ad5C80BB0C3Da9152e833") //0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B
 	//accountBytes := account.Bytes()
 	err = sync.syncOneAccount(account)
 	require.NoError(t, err)
+
+	cinfo := <-sync.concernedAccountInfoCh
+	t.Logf("concernedAccountInfo%+v\n", cinfo)
+
+	bz, err := db.Get(dbm.AccountStoreKey(account.Bytes()), nil)
+	var info AccountInfo
+	err = json.Unmarshal(bz, &info)
+	require.NoError(t, err)
+	t.Logf("account:%v, %+v", account, info)
+
+	had, err := db.Has(dbm.LiquidationBelow1P1StoreKey(account.Bytes()), nil)
+	require.True(t, had)
+
 }
 
 func TestSyncOneAccount2(t *testing.T) {
