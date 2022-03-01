@@ -90,6 +90,11 @@ type Liquidation struct {
 	Endtime      time.Time
 }
 
+type ConcernedAccountInfo struct {
+	Address common.Address
+	Info    AccountInfo
+}
+
 type semaphore chan struct{}
 
 var (
@@ -114,28 +119,28 @@ type Syncer struct {
 	c  *ethclient.Client
 	db *leveldb.DB
 
-	oracle               *venus.Oracle
-	comptroller          *venus.Comptroller
-	pancakeRouter        *venus.IPancakeRouter02
-	pancakeFactory       *venus.IPancakeFactory
-	closeFactor          decimal.Decimal
-	symbols              map[common.Address]string
-	tokens               map[string]*TokenInfo
-	flashLoanPools       map[string][]common.Address
-	vbep20s              map[common.Address]*venus.Vbep20
-	liquidator           *venus.IQingsuan
-	PrivateKey           *ecdsa.PrivateKey
-	m                    sync.Mutex
-	wg                   sync.WaitGroup
-	quitCh               chan struct{}
-	forceUpdatePricesCh  chan struct{}
-	feededPricesCh       chan *FeededPrices
-	liquidationCh        chan *Liquidation
-	priortyLiquidationCh chan *Liquidation
+	oracle                 *venus.Oracle
+	comptroller            *venus.Comptroller
+	pancakeRouter          *venus.IPancakeRouter02
+	pancakeFactory         *venus.IPancakeFactory
+	closeFactor            decimal.Decimal
+	symbols                map[common.Address]string
+	tokens                 map[string]*TokenInfo
+	flashLoanPools         map[string][]common.Address
+	vbep20s                map[common.Address]*venus.Vbep20
+	liquidator             *venus.IQingsuan
+	PrivateKey             *ecdsa.PrivateKey
+	m                      sync.Mutex
+	wg                     sync.WaitGroup
+	quitCh                 chan struct{}
+	forceUpdatePricesCh    chan struct{}
+	feededPricesCh         chan *FeededPrices
+	liquidationCh          chan *Liquidation
+	priortyLiquidationCh   chan *Liquidation
+	concernedAccountInfoCh chan *ConcernedAccountInfo
 }
 
 func init() {
-
 }
 
 func (s semaphore) Acquire() {
@@ -295,25 +300,26 @@ func NewSyncer(
 	}
 
 	return &Syncer{
-		c:                    c,
-		db:                   db,
-		oracle:               oracle,
-		comptroller:          comptroller,
-		pancakeRouter:        pancakeRouter,
-		pancakeFactory:       pancakeFactory,
-		closeFactor:          closeFactor,
-		tokens:               tokens,
-		flashLoanPools:       flashLoanPool,
-		symbols:              symbols,
-		vbep20s:              vbep20s,
-		liquidator:           liquidator,
-		PrivateKey:           privateKey,
-		m:                    m,
-		quitCh:               make(chan struct{}),
-		forceUpdatePricesCh:  make(chan struct{}),
-		feededPricesCh:       feededPricesCh,
-		liquidationCh:        liquidationCh,
-		priortyLiquidationCh: priorityLiquationCh,
+		c:                      c,
+		db:                     db,
+		oracle:                 oracle,
+		comptroller:            comptroller,
+		pancakeRouter:          pancakeRouter,
+		pancakeFactory:         pancakeFactory,
+		closeFactor:            closeFactor,
+		tokens:                 tokens,
+		flashLoanPools:         flashLoanPool,
+		symbols:                symbols,
+		vbep20s:                vbep20s,
+		liquidator:             liquidator,
+		PrivateKey:             privateKey,
+		m:                      m,
+		quitCh:                 make(chan struct{}),
+		forceUpdatePricesCh:    make(chan struct{}),
+		feededPricesCh:         feededPricesCh,
+		liquidationCh:          liquidationCh,
+		priortyLiquidationCh:   priorityLiquationCh,
+		concernedAccountInfoCh: make(chan *ConcernedAccountInfo, 4096),
 	}
 }
 
@@ -321,7 +327,7 @@ func (s *Syncer) Start() {
 	log.Info("server start")
 	fmt.Println("server start")
 
-	s.wg.Add(11)
+	s.wg.Add(12)
 	go s.syncMarketsAndPrices()
 	go s.feedPrices()
 	go s.syncAllBorrowers()
@@ -332,6 +338,7 @@ func (s *Syncer) Start() {
 	go s.syncLiquidationAbove2P0()
 	go s.syncLiquidationNonProfit()
 	go s.monitorLiquidationEvent()
+	go s.printConcernedAccountInfo()
 	go s.liqudate()
 }
 
@@ -805,6 +812,19 @@ func (s *Syncer) monitorLiquidationEvent() {
 	}
 }
 
+func (s *Syncer) printConcernedAccountInfo() {
+	defer s.wg.Done()
+
+	for {
+		select {
+		case <-s.quitCh:
+			return
+		case info := <-s.concernedAccountInfoCh:
+			fmt.Printf("ConernedAccountInfo:%v\n", info)
+		}
+	}
+}
+
 func (s *Syncer) syncAccounts(accounts []common.Address) {
 	var wg sync.WaitGroup
 	wg.Add(len(accounts))
@@ -913,9 +933,17 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 		MaxLoanValue: maxLoanValue,
 		Assets:       assets,
 	}
-	//fmt.Printf("account:%v, info:%+v\n", account, info)
+	if healthFactor.Cmp(Decimal1P1) == -1 {
+		cinfo := &ConcernedAccountInfo{
+			Address: account,
+			Info:    info,
+		}
+		s.concernedAccountInfoCh <- cinfo
+	}
 	s.updateDB(account, info)
-	if healthFactor.Cmp(decimal.New(1, 0)) != 1 {
+
+	errCode, _, shortfall, err := comptroller.GetAccountLiquidity(nil, account)
+	if err == nil && errCode.Cmp(BigZero) == 0 && shortfall.Cmp(BigZero) == 1 {
 		blockNumber, _ := s.c.BlockNumber(ctx)
 		liquidation := &Liquidation{
 			Address:      account,
@@ -924,6 +952,15 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 		}
 		s.liquidationCh <- liquidation
 	}
+	//if healthFactor.Cmp(Decimal1P0) != 1 {
+	//	blockNumber, _ := s.c.BlockNumber(ctx)
+	//	liquidation := &Liquidation{
+	//		Address:      account,
+	//		HealthFactor: healthFactor,
+	//		BlockNumber:  blockNumber,
+	//	}
+	//	s.liquidationCh <- liquidation
+	//}
 	return nil
 }
 
