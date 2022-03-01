@@ -820,7 +820,7 @@ func (s *Syncer) printConcernedAccountInfo() {
 		case <-s.quitCh:
 			return
 		case info := <-s.concernedAccountInfoCh:
-			fmt.Printf("ConernedAccountInfo:%v\n", info)
+			fmt.Printf("ConernedAccountInfo:%+v\n", info)
 		}
 	}
 }
