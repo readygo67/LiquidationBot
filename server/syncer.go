@@ -13,16 +13,19 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/readygo67/LiquidationBot/db"
 	"github.com/readygo67/LiquidationBot/venus"
 	"github.com/shopspring/decimal"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"math/big"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 )
 
 const (
@@ -44,6 +47,7 @@ type TokenInfo struct {
 	UnderlyingDecimals uint8
 	CollateralFactor   decimal.Decimal
 	Price              decimal.Decimal
+	Oracle             common.Address
 }
 
 type Asset struct {
@@ -72,6 +76,12 @@ type AccountInfo struct {
 	Assets       []Asset
 }
 
+type ReadableAccountInfo struct {
+	HealthFactor decimal.Decimal
+	MaxLoanValue decimal.Decimal
+	Assets       []Asset
+}
+
 type FeededPrice struct {
 	Address common.Address
 	Price   decimal.Decimal
@@ -88,14 +98,21 @@ type Liquidation struct {
 	HealthFactor decimal.Decimal
 	BlockNumber  uint64
 	Endtime      time.Time
-	FeedPrices   *FeededPrices
+	FeedPrices   FeededPrices
 }
 
 type ConcernedAccountInfo struct {
 	Address      common.Address
-	FeededPrices *FeededPrices
+	FeededPrices FeededPrices
 	BlockNumber  uint64
 	Info         AccountInfo
+}
+
+type ReadableConcernedAccountInfo struct {
+	Address      common.Address
+	FeededPrices FeededPrices
+	BlockNumber  uint64
+	Info         ReadableAccountInfo
 }
 
 type semaphore chan struct{}
@@ -122,7 +139,7 @@ type Syncer struct {
 	c  *ethclient.Client
 	db *leveldb.DB
 
-	oracle                 *venus.Oracle
+	oracle                 *venus.PriceOracle
 	comptroller            *venus.Comptroller
 	pancakeRouter          *venus.IPancakeRouter02
 	pancakeFactory         *venus.IPancakeFactory
@@ -182,7 +199,7 @@ func NewSyncer(
 	}
 	closeFactor := decimal.NewFromBigInt(bigCloseFactor, 0)
 
-	oracle, err := venus.NewOracle(common.HexToAddress(oracleAddress), c)
+	oracle, err := venus.NewPriceOracle(common.HexToAddress(oracleAddress), c)
 	if err != nil {
 		panic(err)
 	}
@@ -271,12 +288,37 @@ func NewSyncer(
 			collaterFactor := decimal.NewFromBigInt(marketDetail.CollateralFactorMantissa, 0)
 			price := decimal.NewFromBigInt(bigPrice, 0)
 
+			feedSymbol := strings.TrimPrefix(symbol, "v")
+			if feedSymbol == "BTC" {
+				feedSymbol = "BTCB"
+			}
+
+			var finalOracle common.Address
+			if symbol != "vCAN" {
+				feedAddr, err := oracle.GetFeed(nil, feedSymbol)
+				if err != nil {
+					panic(err)
+				}
+
+				priceFeed, err := venus.NewPriceFeed(feedAddr, c)
+				if err != nil {
+					panic(err)
+				}
+
+				finalOracle, err = priceFeed.Aggregator(nil)
+				//fmt.Printf("symbol:%v, priceFeed:%v, oracle:%v\n", symbol, feedAddr, finalOracle)
+				if err != nil {
+					panic(err)
+				}
+			}
+
 			token := &TokenInfo{
 				Address:            market,
 				UnderlyingAddress:  underlyingAddress,
 				UnderlyingDecimals: underlyingDecimals,
 				CollateralFactor:   collaterFactor,
 				Price:              price,
+				Oracle:             finalOracle,
 			}
 
 			m.Lock()
@@ -330,7 +372,7 @@ func (s *Syncer) Start() {
 	log.Info("server start")
 	fmt.Println("server start")
 
-	s.wg.Add(12)
+	s.wg.Add(13)
 	go s.syncMarketsAndPrices()
 	go s.feedPrices()
 	go s.syncAllBorrowers()
@@ -342,6 +384,7 @@ func (s *Syncer) Start() {
 	go s.syncLiquidationNonProfit()
 	go s.monitorLiquidationEvent()
 	go s.printConcernedAccountInfo()
+	go s.monitorTxPool()
 	go s.liqudate()
 }
 
@@ -815,6 +858,75 @@ func (s *Syncer) monitorLiquidationEvent() {
 	}
 }
 
+func (s *Syncer) monitorTxPool() {
+	defer s.wg.Done()
+
+	v := reflect.ValueOf(s.c).Elem()
+	f := v.FieldByName("c")
+	rf := reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem()
+	concrete_client, _ := rf.Interface().(*rpc.Client)
+
+	txPoolTXs := make(chan common.Hash, 2048)
+	concrete_client.EthSubscribe(
+		context.Background(), txPoolTXs, "newPendingTransactions",
+	)
+	aggregatorABI, _ := venus.AggregatorMetaData.GetAbi()
+	OracleToVTokenMap := make(map[common.Address]common.Address)
+
+	for symbol, token := range s.tokens {
+		if symbol != "vCAN" {
+			OracleToVTokenMap[token.Oracle] = token.Address
+		}
+	}
+
+	for {
+		select {
+		case <-s.quitCh:
+			return
+
+		case txHash := <-txPoolTXs:
+			height, _ := s.c.BlockNumber(context.Background())
+			txn, is_pending, err := s.c.TransactionByHash(context.Background(), txHash)
+
+			if err == nil && txn != nil && txn.To() != nil && is_pending == true {
+				vTokenAddress, ok := OracleToVTokenMap[*txn.To()]
+				if !ok || len(txn.Data()) < 5 {
+					continue
+				}
+
+				method, err := aggregatorABI.MethodById(txn.Data()[0:4])
+				if err != nil {
+					continue
+				}
+
+				if method.Name == "transmit" {
+					inputData := make(map[string]interface{})
+					err = method.Inputs.UnpackIntoMap(inputData, txn.Data()[4:])
+					if err != nil {
+						continue
+					}
+
+					data := inputData["_report"].([]byte)
+					numbering := data[32+32+32+32:]
+					numberingmid := numbering[len(numbering)/2 : len(numbering)/2+32]
+					bigFeededPrice := big.NewInt(0).SetBytes(numberingmid)
+
+					feededPrice := FeededPrice{
+						Address: vTokenAddress,
+						Price:   decimal.NewFromBigInt(bigFeededPrice, 10),
+						Hash:    txHash,
+					}
+
+					s.feededPricesCh <- &FeededPrices{
+						Prices: []FeededPrice{feededPrice},
+						Height: height,
+					}
+				}
+			}
+		}
+	}
+}
+
 func (s *Syncer) printConcernedAccountInfo() {
 	defer s.wg.Done()
 
@@ -908,13 +1020,15 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 		totalLoan = totalLoan.Add(loan.Truncate(0))
 
 		//build account table
-		assets = append(assets, Asset{
+		asset := Asset{
 			Symbol:       symbol,
 			Balance:      balance,
 			Loan:         borrow,
 			BalanceValue: balanceValue,
 			LoanValue:    loan,
-		})
+		}
+		//fmt.Printf("symbol:%v, price:%v, asset:%+v\n", symbol, price, asset)
+		assets = append(assets, asset)
 
 		if loan.Cmp(maxLoanValue) == 1 {
 			maxLoanValue = loan
@@ -943,6 +1057,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 			BlockNumber: currentHeight,
 			Info:        info,
 		}
+		//fmt.Printf("cinfo:%v\n", cinfo)
 		s.concernedAccountInfoCh <- cinfo
 	}
 	s.updateDB(account, info)
@@ -1018,7 +1133,7 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 
 		//apply feeded prices if exist
 		for _, feededPrice := range feededPrices.Prices {
-			if tokens[symbol].Address.String() == feededPrice.Address.String() {
+			if tokens[symbol].Address == feededPrice.Address {
 				price = feededPrice.Price
 			}
 		}
@@ -1036,13 +1151,15 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 		totalLoan = totalLoan.Add(loan.Truncate(0))
 
 		//build account table
-		assets = append(assets, Asset{
+		asset := Asset{
 			Symbol:       symbol,
 			Balance:      balance,
 			Loan:         borrow,
 			BalanceValue: balanceValue,
 			LoanValue:    loan,
-		})
+		}
+		//fmt.Printf("symbol:%v, price:%v, asset:%+v\n", symbol, price, asset)
+		assets = append(assets, asset)
 
 		if loan.Cmp(maxLoanValue) == 1 {
 			maxLoanValue = loan
@@ -1064,12 +1181,12 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 		MaxLoanValue: maxLoanValue,
 		Assets:       assets,
 	}
-
+	//fmt.Printf("totalCollateral:%v, totalLoan:%v, info:%+v\n", totalCollateral, totalLoan, info)
 	if healthFactor.Cmp(Decimal1P1) == -1 {
 		currentHeight, _ := s.c.BlockNumber(context.Background())
 		cinfo := &ConcernedAccountInfo{
 			Address:      account,
-			FeededPrices: feededPrices,
+			FeededPrices: *feededPrices,
 			BlockNumber:  currentHeight,
 			Info:         info,
 		}
@@ -1082,7 +1199,7 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 			Address:      account,
 			HealthFactor: healthFactor,
 			BlockNumber:  blockNumber,
-			FeedPrices:   feededPrices,
+			FeedPrices:   *feededPrices,
 		}
 		s.priortyLiquidationCh <- liquidation
 	}
@@ -1166,7 +1283,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	db := s.db
 	feedPrices := liquidation.FeedPrices
 	withFeedPrice := false
-	if feedPrices != nil {
+	if len(feedPrices.Prices) != 0 {
 		withFeedPrice = true
 	}
 
@@ -1176,6 +1293,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	vbep20s := s.vbep20s
 	closeFactor := s.closeFactor
 	s.m.Unlock()
+
 	//current height
 	currentHeight, err := s.c.BlockNumber(context.Background())
 	if err != nil {
@@ -1185,12 +1303,12 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	callOptions := &bind.CallOpts{
 		BlockNumber: big.NewInt(int64(currentHeight)),
 	}
-	has, err := db.Has(dbm.BadLiquidationTx(account.Bytes()), nil)
+	had, err := db.Has(dbm.BadLiquidationTx(account.Bytes()), nil)
 	if err != nil {
 		fmt.Printf("calculateSeizedTokenAmount, fail to get BadLiquidationTx,err:%v\n", err)
 		return err
 	}
-	if has {
+	if had {
 		bz, err := db.Get(dbm.BadLiquidationTx(account.Bytes()), nil)
 		if err != nil {
 			fmt.Printf("calculateSeizedTokenAmount, fail to get BadLiquidationTx,err:%v\n", err)
@@ -1200,6 +1318,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 		recordHeight := big.NewInt(0).SetBytes(bz).Uint64()
 		if currentHeight-recordHeight <= ForbiddenPeriodForBadLiquidation {
 			err = fmt.Errorf("forbidden %v liquidation temporay, currentHeight:%v, recordHeight:%v\n", account, currentHeight, recordHeight)
+			fmt.Printf("forbidden %v liquidation temporay, currentHeight:%v, recordHeight:%v\n", account, currentHeight, recordHeight)
 			return err
 		}
 		db.Delete(dbm.BadLiquidationTx(account.Bytes()), nil)
@@ -1208,16 +1327,12 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	if !withFeedPrice {
 		errCode, _, shortfall, err := comptroller.GetAccountLiquidity(callOptions, account)
 		if err != nil {
-			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAccountLiquidity, account:%v, err:%v\n", account, err)
+			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAccountLiquidity, account:%v, err:%v \n", account, err)
 			return err
 		}
-		if errCode.Cmp(BigZero) != 0 {
-			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAccountLiquidity, account:%v, errCode:%v\n", account, errCode)
-			return err
-		}
-
-		if shortfall.Cmp(BigZero) != 1 {
-			err := fmt.Errorf("calculateSeizedTokenAmount, no shortfall, account:%v", account)
+		if errCode.Cmp(BigZero) != 0 || shortfall.Cmp(BigZero) != 1 {
+			err := fmt.Errorf("calculateSeizedTokenAmount, fail to get GetAccountLiquidity, account:%v, errCode:%v, shortfall:%v \n", account, errCode, shortfall)
+			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAccountLiquidity, account:%v, errCode:%v, shortfall:%v \n", account, errCode, shortfall)
 			return err
 		}
 	}
@@ -1260,7 +1375,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 		collateralFactor := tokens[symbol].CollateralFactor
 		price := tokens[symbol].Price
 
-		//use feedprice if any
+		//use feedprice if exist
 		for _, feedPrice := range feedPrices.Prices {
 			if feedPrice.Address.String() == market.String() {
 				price = feedPrice.Price
@@ -1343,7 +1458,6 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	var repayAmount decimal.Decimal
 	if repaySymbol == "VAI" {
 		repayAmount = repayValue.Truncate(0).Sub(decimal.NewFromInt(100))
-
 		errCode, bigSeizedCTokenAmount, err = comptroller.LiquidateVAICalculateSeizeTokens(callOptions, tokens[seizedSymbol].Address, repayAmount.BigInt())
 		if err != nil {
 			fmt.Printf("calculateSeizedTokenAmount, fail to get LiquidateVAICalculateSeizeTokens, account:%v, err:%v\n", account, err)
@@ -1429,11 +1543,6 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 				return err
 			}
 
-			err = s.checkFlashLoanFromBalance(tokens, repaySymbol, flashLoanFrom, repayAmount)
-			if err != nil {
-				return err
-			}
-
 			gasFee := decimal.NewFromBigInt(bigGasPrice, 0).Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
 			path1 := s.buildVAIPaths(seizedSymbol, repaySymbol, tokens)
 			amountsIn, err := pancakeRouter.GetAmountsIn(callOptions, flashLoanReturnAmount.BigInt(), path1) //amountsIn[0] is the stablecoin needed.
@@ -1465,10 +1574,6 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			flashLoanFrom, err := pancakeFactory.GetPair(nil, VAIAddress, tokens["vBUSD"].UnderlyingAddress)
 			if err != nil {
 				fmt.Printf("calculateSeizedTokenAmount case7, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
-				return err
-			}
-			err = s.checkFlashLoanFromBalance(tokens, repaySymbol, flashLoanFrom, repayAmount)
-			if err != nil {
 				return err
 			}
 
@@ -1524,14 +1629,9 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			gasFee := gasPrice.Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
 			remain := seizedUnderlyingTokenAmount.Sub(flashLoanReturnAmount)
 			profit := (remain.Mul(tokens[seizedSymbol].Price).Div(EXPSACLE)).Sub(gasFee)
-			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, nil, nil)
+			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, repayAmount, nil, nil)
 			if err != nil {
 				fmt.Printf("calculateSeizedTokenAmount case1, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
-				return err
-			}
-
-			err = s.checkFlashLoanFromBalance(tokens, repaySymbol, flashLoanFrom, repayAmount)
-			if err != nil {
 				return err
 			}
 
@@ -1564,13 +1664,9 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 			usdtAmount := decimal.NewFromBigInt(amountsOut[len(amountsOut)-1], 0)
 			profit := (usdtAmount.Mul(tokens["vUSDT"].Price).Div(EXPSACLE)).Sub(gasFee)
-			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, nil, path2)
+			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, repayAmount, nil, path2)
 			if err != nil {
 				fmt.Printf("calculateSeizedTokenAmount case2, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
-				return err
-			}
-			err = s.checkFlashLoanFromBalance(tokens, repaySymbol, flashLoanFrom, repayAmount)
-			if err != nil {
 				return err
 			}
 
@@ -1605,14 +1701,9 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 		remain := seizedUnderlyingTokenAmount.Sub(decimal.NewFromBigInt(amountsIn[0], 0))
 		profit := remain.Mul(tokens[seizedSymbol].Price).Div(EXPSACLE).Sub(gasFee)
-		flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, path1, nil)
+		flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, repayAmount, path1, nil)
 		if err != nil {
 			fmt.Printf("calculateSeizedTokenAmount case3, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
-			return err
-		}
-
-		err = s.checkFlashLoanFromBalance(tokens, repaySymbol, flashLoanFrom, repayAmount)
-		if err != nil {
 			return err
 		}
 
@@ -1644,14 +1735,9 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 			remain := decimal.NewFromBigInt(amountsOut[len(amountsOut)-1], 0).Sub(flashLoanReturnAmount)
 			profit := remain.Mul(tokens[repaySymbol].Price).Div(EXPSACLE).Sub(gasFee)
-			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, path1, nil)
+			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, repayAmount, path1, nil)
 			if err != nil {
 				fmt.Printf("calculateSeizedTokenAmount case4, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
-				return err
-			}
-
-			err = s.checkFlashLoanFromBalance(tokens, repaySymbol, flashLoanFrom, repayAmount)
-			if err != nil {
 				return err
 			}
 
@@ -1690,14 +1776,9 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 			usdtAmount := decimal.NewFromBigInt(amountsOut[len(amountsOut)-1], 0)
 			profit := usdtAmount.Mul(tokens["vUSDT"].Price).Div(EXPSACLE).Sub(gasFee)
-			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, path1, path2)
+			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, repayAmount, path1, path2)
 			if err != nil {
 				fmt.Printf("calculateSeizedTokenAmount case2, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
-				return err
-			}
-
-			err = s.checkFlashLoanFromBalance(tokens, repaySymbol, flashLoanFrom, repayAmount)
-			if err != nil {
 				return err
 			}
 
@@ -1796,27 +1877,28 @@ func (s *Syncer) storeAccount(account common.Address, info AccountInfo) {
 	db.Put(dbm.BorrowersStoreKey(accountBytes), accountBytes, nil)
 }
 
-func (s *Syncer) checkFlashLoanFromBalance(tokens map[string]*TokenInfo, repaySymbol string, flashLoanFrom common.Address, repayAmount decimal.Decimal) error {
-	repayBep20, err := venus.NewBep20(tokens[repaySymbol].UnderlyingAddress, s.c)
-	if err != nil {
-		fmt.Printf("checkFlashLoanFromBalance, fail to build repaybep20, repaySymbol:%v, err:%v\n", repaySymbol, err)
-		return err
-	}
-
-	balance, err := repayBep20.BalanceOf(nil, flashLoanFrom)
-	if err != nil {
-		fmt.Printf("checkFlashLoanFromBalance, fail to get repaybep20 balance, repaySymbol:%v, err:%v\n", repaySymbol, err)
-		return err
-	}
-
-	if decimal.NewFromBigInt(balance, 0).Cmp(repayAmount) == -1 {
-		fmt.Printf("checkFlashLoanFromBalance, flashLoanFrom has insufficient balance, repaySymbol:%v, flashLoanFrom:%v\n", repaySymbol, flashLoanFrom)
-		err := fmt.Errorf("checkFlashLoanFromBalance, flashLoanFrom has insufficient balance, repaySymbol:%v, flashLoanFrom:%v\n", repaySymbol, flashLoanFrom)
-		return err
-	}
-
-	return nil
-}
+//
+//func (s *Syncer) checkFlashLoanFromBalance(tokens map[string]*TokenInfo, repaySymbol string, flashLoanFrom common.Address, repayAmount decimal.Decimal) error {
+//	repayBep20, err := venus.NewBep20(tokens[repaySymbol].UnderlyingAddress, s.c)
+//	if err != nil {
+//		fmt.Printf("checkFlashLoanFromBalance, fail to build repaybep20, repaySymbol:%v, err:%v\n", repaySymbol, err)
+//		return err
+//	}
+//
+//	balance, err := repayBep20.BalanceOf(nil, flashLoanFrom)
+//	if err != nil {
+//		fmt.Printf("checkFlashLoanFromBalance, fail to get repaybep20 balance, repaySymbol:%v, err:%v\n", repaySymbol, err)
+//		return err
+//	}
+//
+//	if decimal.NewFromBigInt(balance, 0).Cmp(repayAmount) == -1 {
+//		fmt.Printf("checkFlashLoanFromBalance, flashLoanFrom has insufficient balance, repaySymbol:%v, flashLoanFrom:%v\n", repaySymbol, flashLoanFrom)
+//		err := fmt.Errorf("checkFlashLoanFromBalance, flashLoanFrom has insufficient balance, repaySymbol:%v, flashLoanFrom:%v\n", repaySymbol, flashLoanFrom)
+//		return err
+//	}
+//
+//	return nil
+//}
 
 func copySymbols(src map[common.Address]string) map[common.Address]string {
 	dst := make(map[common.Address]string)
@@ -1889,7 +1971,9 @@ func (s *Syncer) buildVAIPaths(srcSymbol, dstSymbol string, tokens map[string]*T
 	return nil
 }
 
-func (s *Syncer) selectFlashLoanFrom(repaySymbol string, path1 []common.Address, path2 []common.Address) (common.Address, error) {
+// path1: [seizedSymbol, intermediateSymbol, repaySymbol]
+// path2: [seizedSymbol, "USDT"]
+func (s *Syncer) selectFlashLoanFrom(repaySymbol string, repayAmount decimal.Decimal, path1 []common.Address, path2 []common.Address) (common.Address, error) {
 	var pair1, pair2 common.Address
 	var err error
 	len1 := len(path1)
@@ -1908,11 +1992,21 @@ func (s *Syncer) selectFlashLoanFrom(repaySymbol string, path1 []common.Address,
 		}
 	}
 
+	bep20, err := venus.NewBep20(s.tokens[repaySymbol].UnderlyingAddress, s.c)
+	if err != nil {
+		return common.Address{}, err
+	}
+
 	for _, pair := range s.flashLoanPools[repaySymbol] {
-		if pair.String() != pair1.String() &&
-			pair.String() != pair2.String() &&
-			pair.String() != "0x0000000000000000000000000000000000000000" {
-			return pair, nil
+		if pair != pair1 && pair != pair2 && pair != common.HexToAddress("0x0000000000000000000000000000000000000000") {
+			balance, err := bep20.BalanceOf(nil, pair)
+			if err != nil {
+				continue
+			}
+
+			if decimal.NewFromBigInt(balance, 0).Cmp(repayAmount) == 1 {
+				return pair, nil
+			}
 		}
 	}
 
@@ -1959,4 +2053,32 @@ func (s *Syncer) doLiquidation(scenarioNo *big.Int, flashLoanFrom common.Address
 	}
 
 	return tx, nil
+}
+
+func (info *AccountInfo) toReadable() ReadableAccountInfo {
+	readableInfo := ReadableAccountInfo{}
+	readableInfo.HealthFactor = info.HealthFactor
+	readableInfo.MaxLoanValue = info.MaxLoanValue.Div(EXPSACLE)
+
+	var readableAssets []Asset
+	for _, asset := range info.Assets {
+		var readableAsset Asset
+		readableAsset.Symbol = asset.Symbol
+		readableAsset.Balance = asset.Balance
+		readableAsset.Loan = asset.Loan
+		readableAsset.BalanceValue = asset.BalanceValue.Div(EXPSACLE)
+		readableAsset.LoanValue = asset.LoanValue.Div(EXPSACLE)
+		readableAssets = append(readableAssets, readableAsset)
+	}
+	readableInfo.Assets = readableAssets
+	return readableInfo
+}
+
+func (info *ConcernedAccountInfo) toReadable() ReadableConcernedAccountInfo {
+	readableInfo := ReadableConcernedAccountInfo{}
+	readableInfo.FeededPrices = info.FeededPrices
+	readableInfo.Address = info.Address
+	readableInfo.BlockNumber = info.BlockNumber
+	readableInfo.Info = info.Info.toReadable()
+	return readableInfo
 }
