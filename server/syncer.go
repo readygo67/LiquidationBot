@@ -510,7 +510,7 @@ func (s *Syncer) doFeededPrices(feededPrices *FeededPrices) {
 		go func() {
 			defer sem.Release()
 			defer wg.Done()
-			s.syncOneAccount(account)
+			s.syncOneAccountWithFeededPrices(account, feededPrices)
 		}()
 	}
 	wg.Wait()
