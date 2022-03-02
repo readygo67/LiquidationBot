@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/readygo67/LiquidationBot/config"
 	dbm "github.com/readygo67/LiquidationBot/db"
 	"github.com/readygo67/LiquidationBot/venus"
@@ -17,9 +18,11 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"math/big"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 var syncer *Syncer
@@ -1902,4 +1905,77 @@ func verifyTokens(t *testing.T, sync *Syncer) {
 	require.Equal(t, common.HexToAddress("0x95c78222B3D6e262426483D42CfA53685A67Ab9D"), sync.tokens["vBUSD"].Address)
 	require.Equal(t, common.HexToAddress("0xf508fCD89b8bd15579dc79A6827cB4686A3592c8"), sync.tokens["vETH"].Address)
 	require.Equal(t, common.HexToAddress("0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8"), sync.tokens["vUSDC"].Address)
+}
+
+func TestGetOracle(t *testing.T) {
+
+	rpcURL := "ws://192.168.88.144:28546"
+	c, _ := ethclient.Dial(rpcURL)
+
+	oracle, _ := venus.NewPriceOracle(common.HexToAddress("0xd8b6da2bfec71d684d3e2a2fc9492ddad5c3787f"), c)
+	tokens := [24]string{"ETH", "USDT", "TRX", "TUSD", "AAVE", "CAKE", "MATIC", "MATIC", "DOGE", "ADA", "CAN", "BETH", "DAI", "LINK", "DOT", "BCH", "XRP", "LTC", "BTCB", "BNB", "XVS", "SXP", "BUSD", "USDC"}
+	for _, token := range tokens {
+		feedAddr, _ := oracle.GetFeed(nil, token)
+		priceFeed, _ := venus.NewPriceFeed(feedAddr, c)
+		finalOracle, _ := priceFeed.Aggregator(nil)
+		println(token, strings.ToLower(finalOracle.String()))
+	}
+
+}
+
+func TestMonitorTxPool(t *testing.T) {
+	rpcURL := "ws://192.168.88.144:28546"
+	client, _ := ethclient.Dial(rpcURL)
+	fmt.Println("We have a connection")
+	v := reflect.ValueOf(client).Elem()
+	f := v.FieldByName("c")
+	rf := reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem()
+	concrete_client, _ := rf.Interface().(*rpc.Client)
+	txPoolTXs := make(chan common.Hash)
+	concrete_client.EthSubscribe(
+		context.Background(), txPoolTXs, "newPendingTransactions",
+	)
+	targetMap := make(map[string]struct{}, 24)
+	targetMap["0x137924d7c36816e0dcaf016eb617cc2c92c05782"] = struct{}{} //BNB
+	targetMap["0x178ba789e24a1d51e9ea3cb1db3b52917963d71d"] = struct{}{} //BTCB
+	targetMap["0xfc3069296a691250ffdf21fe51340fdd415a76ed"] = struct{}{} //ETH
+	targetMap["0x7935a51addab8550d346feef34e02f67c9330109"] = struct{}{} //CAKE
+	aggregatorABI, _ := venus.AggregatorMetaData.GetAbi()
+	for txn := range txPoolTXs {
+
+		txn, is_pending, err := client.TransactionByHash(context.Background(), txn)
+		if err == nil && txn != nil && txn.To() != nil && is_pending == true {
+
+			_, ok := targetMap[strings.ToLower(txn.To().String())]
+			if ok {
+
+				if len(txn.Data()) < 5 {
+					//Error
+				}
+				method, err := aggregatorABI.MethodById(txn.Data()[0:4])
+				if err != nil {
+					//Error
+				}
+				if method.Name == "transmit" {
+					inputData := make(map[string]interface{})
+					err = method.Inputs.UnpackIntoMap(inputData, txn.Data()[4:])
+					data := inputData["_report"].([]byte)
+					numbering := data[32+32+32+32:]
+					numberingmid := numbering[len(numbering)/2 : len(numbering)/2+32]
+
+					if err != nil {
+						panic(err)
+					}
+					fmt.Println("==================")
+					fmt.Println(txn.Hash().String(), "is updateing price @", time.Now())
+					fmt.Printf("% s % x \n", txn.Hash().String(), numberingmid)
+					result := big.NewInt(0).SetBytes(numberingmid)
+					fmt.Println(txn.Hash().String(), "price: ", result)
+				}
+
+			}
+
+		}
+	}
+
 }
