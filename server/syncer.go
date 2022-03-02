@@ -488,49 +488,52 @@ func (s *Syncer) feedPrices() {
 func (s *Syncer) doFeededPrices(feededPrices *FeededPrices) {
 	db := s.db
 	var accounts []common.Address
-	exist := make(map[common.Address]bool)
 
-	var wg sync.WaitGroup
-	var m sync.Mutex
-	wg.Add(len(feededPrices.Prices))
-
-	sem := make(semaphore, runtime.NumCPU())
 	for _, feededPrice := range feededPrices.Prices {
-		sem.Acquire()
 		symbol := s.symbols[feededPrice.Address]
 		prefix := append(dbm.MarketPrefix, []byte(symbol)...)
-
-		go func() {
-			sem.Release()
-			wg.Done()
-			iter := db.NewIterator(util.BytesPrefix(prefix), nil)
-			for iter.Next() {
-				account := common.BytesToAddress(iter.Value())
-				if exist[account] {
-					continue
-				}
-				m.Lock()
-				exist[account] = true
-				accounts = append(accounts, account)
-				m.Unlock()
-			}
-			iter.Release()
-		}()
+		iter := db.NewIterator(util.BytesPrefix(prefix), nil)
+		for iter.Next() {
+			account := common.BytesToAddress(iter.Value())
+			accounts = append(accounts, account)
+		}
+		iter.Release()
+		fmt.Printf("doFeededPrices, symbol:%v, feededPrice:%v, accounts:%v\n", symbol, feededPrice, accounts)
 	}
-	wg.Wait()
 
+	var wg sync.WaitGroup
 	wg.Add(len(accounts))
-	for _, account := range accounts {
+	sem := make(semaphore, runtime.NumCPU())
+	for _, account_ := range accounts {
+		account := account_
 		sem.Acquire()
 		go func() {
-			sem.Release()
-			wg.Done()
-			s.syncOneAccountWithFeededPrices(account, feededPrices)
+			defer sem.Release()
+			defer wg.Done()
+			s.syncOneAccount(account)
 		}()
 	}
 	wg.Wait()
 }
 
+/*
+func (s *Syncer) syncAccounts(accounts []common.Address) {
+	var wg sync.WaitGroup
+	wg.Add(len(accounts))
+	sem := make(semaphore, runtime.NumCPU())
+
+	for _, account_ := range accounts {
+		account := account_
+		sem.Acquire()
+		go func() {
+			defer sem.Release()
+			defer wg.Done()
+			s.syncOneAccount(account)
+		}()
+	}
+	wg.Wait()
+}
+*/
 func (s *Syncer) syncAllBorrowers() {
 	defer s.wg.Done()
 	db := s.db
