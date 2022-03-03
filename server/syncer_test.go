@@ -2387,3 +2387,14 @@ func TestRoutineException(t *testing.T) {
 	}
 	close(quitCh)
 }
+
+func TestCheckChannelElementWithoutRead(t *testing.T) {
+	inputCh := make(chan int, 100)
+
+	fmt.Printf("elementNumber:%v\n", len(inputCh))
+	for i := 0; i < 20; i++ {
+		inputCh <- i
+		fmt.Printf("elementNumber:%v\n", len(inputCh))
+		time.Sleep(10 * time.Millisecond)
+	}
+}

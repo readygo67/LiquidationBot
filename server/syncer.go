@@ -32,7 +32,7 @@ const (
 	ConfirmHeight                    = 0
 	ScanSpan                         = 1000
 	SyncIntervalBelow1P0             = 1 //in secs
-	SyncIntervalBelow1P1             = 3
+	SyncIntervalBelow1P1             = 1
 	SyncIntervalBelow1P5             = 9
 	SyncIntervalBelow2P0             = 18
 	SyncIntervalAbove2P0             = 60
@@ -407,7 +407,7 @@ func (s *Syncer) syncMarketsAndPrices() {
 			fmt.Printf("%v th sync markers and prices @ %v\n", count, time.Now())
 			count++
 			s.doSyncMarketsAndPrices()
-			t.Reset(time.Second * 3)
+			t.Reset(time.Second * 1)
 		case <-s.forceUpdatePricesCh:
 			s.doSyncMarketsAndPrices()
 		}
@@ -471,6 +471,16 @@ func (s *Syncer) doSyncMarketsAndPrices() {
 		}()
 	}
 	wg.Wait()
+	height, _ := s.c.BlockNumber(context.Background())
+
+	/*
+		{Symbol:vBNB Balance:4959739999 Loan:3060516716829526968 BalanceValue:435698669662415042477.5566923010238797 LoanValue:1246079514273667515299.43624672}
+		{Symbol:vETH Balance:40110372545 Loan:4835244370034888009 BalanceValue:23537664876807968368926.1857421673701935 LoanValue:14041259535919112684855.46}
+		{Symbol:vBTC Balance:4635011767 Loan:570854728792404703 BalanceValue:40636611483909285218027.9182222805969691 LoanValue:24768147927540960544964.49}
+		{Symbol:vBUSD Balance:0 Loan:8313815140748913950270 BalanceValue:0 LoanValue:8314006774187908212736.5537235}]}}
+	*/
+	fmt.Printf("doSyncMarketsAndPrices, height:%v, vBNB:%v, vETH:%v, vBTC:%v, vBUSD:%v\n", height, s.tokens["vBNB"].Price, s.tokens["vETH"].Price, s.tokens["vBTC"].Price, s.tokens["vBUSD"].Price)
+
 }
 
 func (s *Syncer) feedPrices() {
@@ -937,8 +947,8 @@ func (s *Syncer) printConcernedAccountInfo() {
 		select {
 		case <-s.quitCh:
 			return
-		case info := <-s.concernedAccountInfoCh:
-			fmt.Printf("ConernedAccountInfo:%+v\n", info)
+		case <-s.concernedAccountInfoCh:
+			//fmt.Printf("ConernedAccountInfo:%+v\n", info)
 		}
 	}
 }
@@ -1060,7 +1070,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 			BlockNumber: currentHeight,
 			Info:        info,
 		}
-		//fmt.Printf("cinfo:%v\n", cinfo)
+		fmt.Printf("syncOneAccount,height:%v cinfo:%v\n", currentHeight, cinfo)
 		s.concernedAccountInfoCh <- cinfo
 	}
 	s.updateDB(account, info)
@@ -1117,12 +1127,12 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 	for _, market := range markets {
 		errCode, bigBalance, bigBorrow, bigExchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
 		if err != nil {
-			fmt.Printf("syncOneAccount, fail to get GetAccountSnapshot, err:%v\n", err)
+			fmt.Printf("syncOneAccountWithFeededPrices, fail to get GetAccountSnapshot, err:%v\n", err)
 			return err
 		}
 
 		if errCode.Cmp(BigZero) != 0 {
-			fmt.Printf("syncOneAccount, fail to get GetAccountSnapshot, errCode:%v\n", errCode)
+			fmt.Printf("syncOneAccountWithFeededPrices, fail to get GetAccountSnapshot, errCode:%v\n", errCode)
 			return err
 		}
 
@@ -1161,7 +1171,7 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 			BalanceValue: balanceValue,
 			LoanValue:    loan,
 		}
-		//fmt.Printf("symbol:%v, price:%v, asset:%+v\n", symbol, price, asset)
+		fmt.Printf("syncOneAccountWithFeededPrices, symbol:%v, price:%v, asset:%+v\n", symbol, price, asset)
 		assets = append(assets, asset)
 
 		if loan.Cmp(maxLoanValue) == 1 {
@@ -1184,7 +1194,7 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 		MaxLoanValue: maxLoanValue,
 		Assets:       assets,
 	}
-	//fmt.Printf("totalCollateral:%v, totalLoan:%v, info:%+v\n", totalCollateral, totalLoan, info)
+	fmt.Printf("syncOneAccountWithFeededPrices, totalCollateral:%v, totalLoan:%v, info:%+v\n", totalCollateral, totalLoan, info)
 	if healthFactor.Cmp(Decimal1P1) == -1 {
 		currentHeight, _ := s.c.BlockNumber(context.Background())
 		cinfo := &ConcernedAccountInfo{

@@ -28,7 +28,7 @@ func TestSyncOneAccountWithFeededPrices2(t *testing.T) {
 	feededPricesCh := make(chan *FeededPrices, 64)
 
 	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
-	account := common.HexToAddress("0xF5A008a26c8C06F0e778ac07A0db9a2f42423c84") //0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B
+	account := common.HexToAddress("0xDfBe18F35cD3FC6B9CBd3B643b110889635b1Ee9") //0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B
 	accountBytes := account.Bytes()
 	err = sync.syncOneAccount(account)
 	require.NoError(t, err)
@@ -77,11 +77,15 @@ func TestSyncOneAccountWithFeededPrices2(t *testing.T) {
 	//height, err := sync.c.BlockNumber(context.Background())
 	//require.NoError(t, err)
 
-	sync.wg.Add(2)
+	sync.wg.Add(5)
+	go sync.syncMarketsAndPrices()
+	go sync.syncLiquidationBelow1P1()
 	go sync.monitorTxPool()
 	go sync.feedPrices()
+	go sync.printConcernedAccountInfo()
 
 	waitExit()
+	
 	close(sync.quitCh)
 	sync.wg.Wait()
 
