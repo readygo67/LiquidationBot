@@ -929,7 +929,8 @@ func (s *Syncer) monitorTxPool() {
 						Price:   decimal.NewFromBigInt(bigFeededPrice, 10),
 						Hash:    txHash,
 					}
-					fmt.Printf("catch feedPrice:%+v\n", feededPrice)
+
+					fmt.Printf("catch feedPrice, height:%v, symbol:%v, price:%+v\n", height, s.symbols[vTokenAddress], feededPrice)
 					s.feededPricesCh <- &FeededPrices{
 						Prices: []FeededPrice{feededPrice},
 						Height: height,
@@ -1042,7 +1043,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 			LoanValue:    loan,
 		}
 
-		fmt.Printf("symbol:%v, price:%v, exchangeRate:%v, asset:%+v\n", symbol, price, bigExchangeRate, asset)
+		fmt.Printf("syncOneAccount, symbol:%v, price:%v, exchangeRate:%v, asset:%+v\n", symbol, price, bigExchangeRate, asset)
 		assets = append(assets, asset)
 		if loan.Cmp(maxLoanValue) == 1 {
 			maxLoanValue = loan
@@ -1064,15 +1065,15 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 		MaxLoanValue: maxLoanValue,
 		Assets:       assets,
 	}
+        currentHeight, _ := s.c.BlockNumber(context.Background())
+        fmt.Printf("syncOneAccount,account:%v, height:%v,totalCollateral:%v, totalLoan:%v,info:%+v\n", account, currentHeight, totalCollateral, totalLoan, info.toReadable())
+        fmt.Printf("\n")
 	if healthFactor.Cmp(Decimal1P1) == -1 {
-		currentHeight, _ := s.c.BlockNumber(context.Background())
 		cinfo := &ConcernedAccountInfo{
 			Address:     account,
 			BlockNumber: currentHeight,
 			Info:        info,
 		}
-		fmt.Printf("syncOneAccount,height:%v cinfo:%+v\n", currentHeight, cinfo.toReadable())
-		fmt.Printf("\n")
 		s.concernedAccountInfoCh <- cinfo
 	}
 	s.updateDB(account, info)
@@ -1173,7 +1174,7 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 			BalanceValue: balanceValue,
 			LoanValue:    loan,
 		}
-		fmt.Printf("syncOneAccountWithFeededPrices, symbol:%v, price:%v, asset:%+v\n", symbol, price, asset)
+		fmt.Printf("syncOneAccountWithFeededPrices, symbol:%v, exchangeRate:%v,price:%v, asset:%+v\n", symbol, exchangeRate,price, asset)
 		assets = append(assets, asset)
 
 		if loan.Cmp(maxLoanValue) == 1 {
@@ -1196,9 +1197,10 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 		MaxLoanValue: maxLoanValue,
 		Assets:       assets,
 	}
-	fmt.Printf("syncOneAccountWithFeededPrices, totalCollateral:%v, totalLoan:%v, info:%+v\n", totalCollateral, totalLoan, info)
+
+        currentHeight, _ := s.c.BlockNumber(context.Background())
+	fmt.Printf("syncOneAccountWithFeededPrices,account:%v, height:%v,  totalCollateral:%v, totalLoan:%v, info:%+v\n",account, currentHeight, totalCollateral, totalLoan, info.toReadable())
 	if healthFactor.Cmp(Decimal1P1) == -1 {
-		currentHeight, _ := s.c.BlockNumber(context.Background())
 		cinfo := &ConcernedAccountInfo{
 			Address:      account,
 			FeededPrices: *feededPrices,

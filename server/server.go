@@ -20,7 +20,7 @@ const DefaultStartHeigt = uint64(13000000)
 func Start(cfg *config.Config) error {
 	fmt.Printf("start for feedPrice test\n")
 	cfg, err := config.New("../config.yml")
-	rpcURL := "ws://42.3.146.198:21994"
+	rpcURL := "ws://192.168.88.144:28546"
 	c, _ := ethclient.Dial(rpcURL)
 
 	db, err := dbm.NewDB("testdb1")
