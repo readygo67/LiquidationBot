@@ -1070,7 +1070,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 			BlockNumber: currentHeight,
 			Info:        info,
 		}
-		fmt.Printf("syncOneAccount,height:%v cinfo:%v\n", currentHeight, cinfo)
+		fmt.Printf("syncOneAccount,height:%v cinfo:%+v\n", currentHeight, cinfo.toReadable)
 		s.concernedAccountInfoCh <- cinfo
 	}
 	s.updateDB(account, info)

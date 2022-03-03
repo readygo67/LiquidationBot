@@ -15,7 +15,7 @@ import (
 func TestSyncOneAccountWithFeededPrices2(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	require.NoError(t, err)
-	rpcURL := "ws://42.3.146.198:21994"
+	rpcURL := "ws://192.168.88.144:28546"
 	c, err := ethclient.Dial(rpcURL)
 
 	db, err := dbm.NewDB("testdb1")
