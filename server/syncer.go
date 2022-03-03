@@ -404,7 +404,7 @@ func (s *Syncer) syncMarketsAndPrices() {
 		case <-s.quitCh:
 			return
 		case <-t.C:
-			fmt.Printf("%v th sync markers and prices @ %v\n", count, time.Now())
+			//fmt.Printf("%v th sync markers and prices @ %v\n", count, time.Now())
 			count++
 			s.doSyncMarketsAndPrices()
 			t.Reset(time.Second * 1)
@@ -891,7 +891,7 @@ func (s *Syncer) monitorTxPool() {
 			OracleToVTokenMap[token.Oracle] = token.Address
 		}
 	}
-
+	fmt.Printf("monitorTxPool running....\n")
 	for {
 		select {
 		case <-s.quitCh:
@@ -1000,6 +1000,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 	}
 
 	maxLoanValue := decimal.NewFromInt(0)
+	fmt.Printf("\n")
 	for _, market := range markets {
 		errCode, bigBalance, bigBorrow, bigExchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
 		if err != nil {
@@ -1040,9 +1041,9 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 			BalanceValue: balanceValue,
 			LoanValue:    loan,
 		}
-		fmt.Printf("symbol:%v, price:%v, asset:%+v\n", symbol, price, asset)
-		assets = append(assets, asset)
 
+		fmt.Printf("symbol:%v, price:%v, exchangeRate:%v, asset:%+v\n", symbol, price, bigExchangeRate, asset)
+		assets = append(assets, asset)
 		if loan.Cmp(maxLoanValue) == 1 {
 			maxLoanValue = loan
 		}
@@ -1071,6 +1072,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 			Info:        info,
 		}
 		fmt.Printf("syncOneAccount,height:%v cinfo:%+v\n", currentHeight, cinfo.toReadable())
+		fmt.Printf("\n")
 		s.concernedAccountInfoCh <- cinfo
 	}
 	s.updateDB(account, info)

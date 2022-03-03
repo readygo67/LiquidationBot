@@ -20,7 +20,7 @@ const DefaultStartHeigt = uint64(13000000)
 func Start(cfg *config.Config) error {
 	fmt.Printf("start for feedPrice test\n")
 	cfg, err := config.New("../config.yml")
-	rpcURL := "ws://192.168.88.144:28546"
+	rpcURL := "ws://42.3.146.198:21994"
 	c, _ := ethclient.Dial(rpcURL)
 
 	db, err := dbm.NewDB("testdb1")
@@ -65,7 +65,7 @@ func Start(cfg *config.Config) error {
 	bz, err = db.Get(dbm.AccountStoreKey(accountBytes), nil)
 	var info AccountInfo
 	err = json.Unmarshal(bz, &info)
-	fmt.Printf("info:%+v\n", info.toReadable())
+	//fmt.Printf("info:%+v\n", info.toReadable())
 
 	for _, asset := range info.Assets {
 		symbol := asset.Symbol
@@ -100,7 +100,7 @@ func Start(cfg *config.Config) error {
 
 	//height, err := sync.c.BlockNumber(context.Background())
 	//require.NoError(t, err)
-	fmt.Printf("enter loop from nowon")
+	fmt.Printf("***********enter loop from nowon\n**********")
 	sync.wg.Add(5)
 	go sync.syncMarketsAndPrices()
 	go sync.syncLiquidationBelow1P1()
