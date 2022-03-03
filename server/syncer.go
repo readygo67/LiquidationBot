@@ -675,7 +675,7 @@ func (s *Syncer) syncLiquidationBelow1P1() {
 		case <-s.quitCh:
 			return
 		case <-t.C:
-			fmt.Printf("%vth sync below 1.1 start @ %v\n", count, time.Now())
+			//fmt.Printf("%vth sync below 1.1 start @ %v\n", count, time.Now())
 			count++
 
 			var accounts []common.Address
@@ -929,7 +929,7 @@ func (s *Syncer) monitorTxPool() {
 						Price:   decimal.NewFromBigInt(bigFeededPrice, 10),
 						Hash:    txHash,
 					}
-
+					fmt.Printf("catch feedPrice:%+v\n", feededPrice)
 					s.feededPricesCh <- &FeededPrices{
 						Prices: []FeededPrice{feededPrice},
 						Height: height,
@@ -1040,7 +1040,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 			BalanceValue: balanceValue,
 			LoanValue:    loan,
 		}
-		//fmt.Printf("symbol:%v, price:%v, asset:%+v\n", symbol, price, asset)
+		fmt.Printf("symbol:%v, price:%v, asset:%+v\n", symbol, price, asset)
 		assets = append(assets, asset)
 
 		if loan.Cmp(maxLoanValue) == 1 {
@@ -1070,7 +1070,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 			BlockNumber: currentHeight,
 			Info:        info,
 		}
-		fmt.Printf("syncOneAccount,height:%v cinfo:%+v\n", currentHeight, cinfo.toReadable)
+		fmt.Printf("syncOneAccount,height:%v cinfo:%+v\n", currentHeight, cinfo.toReadable())
 		s.concernedAccountInfoCh <- cinfo
 	}
 	s.updateDB(account, info)
