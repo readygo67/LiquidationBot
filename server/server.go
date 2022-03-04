@@ -32,7 +32,7 @@ func Start(cfg *config.Config) error {
 	feededPricesCh := make(chan *FeededPrices, 64)
 
 	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
-	account := common.HexToAddress("0xDfBe18F35cD3FC6B9CBd3B643b110889635b1Ee9") //0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B
+	account := common.HexToAddress("0xc528045078ff53ea289fa42af3e12d8ef901cabd") //0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B
 	accountBytes := account.Bytes()
 
 	sync.syncOneAccount(account)
