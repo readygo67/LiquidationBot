@@ -531,7 +531,7 @@ func (s *Syncer) doFeededPrices(feededPrices *FeededPrices) {
 	}
 
 	for _, feededPrice := range feededPrices.Prices {
-		symbol := s.symbols[feededPrice.Address]
+		symbol := symbols[feededPrice.Address]
 		symbol2 := ""
 
 		if symbol == "vBETH" {
@@ -863,6 +863,10 @@ func (s *Syncer) monitorLiquidationEvent() {
 	t := time.NewTimer(0)
 	defer t.Stop()
 
+	s.m.Lock()
+	tokens := s.tokens
+	s.m.Unlock()
+
 	vbep20Abi, err := abi.JSON(strings.NewReader(venus.Vbep20MetaData.ABI))
 	if err != nil {
 		panic(err)
@@ -878,7 +882,7 @@ func (s *Syncer) monitorLiquidationEvent() {
 	topicLiquidateBorrow := common.HexToHash("0x298637f684da70674f26509b10f07ec2fbc77a335ab1e7d6215a4b2484d8bb52")
 
 	var vTokenAddresses []common.Address
-	for _, token := range s.tokens {
+	for _, token := range tokens {
 		vTokenAddresses = append(vTokenAddresses, token.Address)
 	}
 
@@ -1204,7 +1208,7 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 		symbol := symbols[market]
 		collateralFactor := tokens[symbol].CollateralFactor
 
-		//use latest price event it is pending
+		//use latest price even it is pending
 		price := tokens[symbol].Price
 		if tokens[symbol].FeedPriceUpdateHeihgt > tokens[symbol].PriceUpdateHeight {
 			price = tokens[symbol].FeedPrice
@@ -1212,9 +1216,9 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 
 		//apply feeded prices if exist
 		for _, feededPrice := range feededPrices.Prices {
-			if s.symbols[feededPrice.Address] == symbol {
+			if symbols[feededPrice.Address] == symbol {
 				price = feededPrice.Price
-			} else if strings.Contains(s.symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
+			} else if strings.Contains(symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
 				price = feededPrice.Price
 			}
 		}
@@ -1451,9 +1455,9 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 		//use feedprice if exist
 		for _, feededPrice := range feededPrices.Prices {
-			if s.symbols[feededPrice.Address] == symbol {
+			if symbols[feededPrice.Address] == symbol {
 				price = feededPrice.Price
-			} else if strings.Contains(s.symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
+			} else if strings.Contains(symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
 				price = feededPrice.Price
 			}
 		}
@@ -1719,7 +1723,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			gasFee := gasPrice.Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
 			remain := seizedUnderlyingTokenAmount.Sub(flashLoanReturnAmount)
 			profit := (remain.Mul(tokens[seizedSymbol].Price).Div(EXPSACLE)).Sub(gasFee)
-			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, repayAmount, nil, nil)
+			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, tokens[repaySymbol].UnderlyingAddress, repayAmount, nil, nil)
 			if err != nil {
 				fmt.Printf("calculateSeizedTokenAmount case1, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
 				return err
@@ -1754,7 +1758,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 			usdtAmount := decimal.NewFromBigInt(amountsOut[len(amountsOut)-1], 0)
 			profit := (usdtAmount.Mul(tokens["vUSDT"].Price).Div(EXPSACLE)).Sub(gasFee)
-			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, repayAmount, nil, path2)
+			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, tokens[repaySymbol].UnderlyingAddress, repayAmount, nil, path2)
 			if err != nil {
 				fmt.Printf("calculateSeizedTokenAmount case2, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
 				return err
@@ -1791,7 +1795,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 		remain := seizedUnderlyingTokenAmount.Sub(decimal.NewFromBigInt(amountsIn[0], 0))
 		profit := remain.Mul(tokens[seizedSymbol].Price).Div(EXPSACLE).Sub(gasFee)
-		flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, repayAmount, path1, nil)
+		flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, tokens[repaySymbol].UnderlyingAddress, repayAmount, path1, nil)
 		if err != nil {
 			fmt.Printf("calculateSeizedTokenAmount case3, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
 			return err
@@ -1825,7 +1829,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 			remain := decimal.NewFromBigInt(amountsOut[len(amountsOut)-1], 0).Sub(flashLoanReturnAmount)
 			profit := remain.Mul(tokens[repaySymbol].Price).Div(EXPSACLE).Sub(gasFee)
-			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, repayAmount, path1, nil)
+			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, tokens[repaySymbol].UnderlyingAddress, repayAmount, path1, nil)
 			if err != nil {
 				fmt.Printf("calculateSeizedTokenAmount case4, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
 				return err
@@ -1866,7 +1870,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 			usdtAmount := decimal.NewFromBigInt(amountsOut[len(amountsOut)-1], 0)
 			profit := usdtAmount.Mul(tokens["vUSDT"].Price).Div(EXPSACLE).Sub(gasFee)
-			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, repayAmount, path1, path2)
+			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, tokens[repaySymbol].UnderlyingAddress, repayAmount, path1, path2)
 			if err != nil {
 				fmt.Printf("calculateSeizedTokenAmount case2, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
 				return err
@@ -2063,7 +2067,7 @@ func (s *Syncer) buildVAIPaths(srcSymbol, dstSymbol string, tokens map[string]*T
 
 // path1: [seizedSymbol, intermediateSymbol, repaySymbol]
 // path2: [seizedSymbol, "USDT"]
-func (s *Syncer) selectFlashLoanFrom(repaySymbol string, repayAmount decimal.Decimal, path1 []common.Address, path2 []common.Address) (common.Address, error) {
+func (s *Syncer) selectFlashLoanFrom(repaySymbol string, repayUnderlyingAddress common.Address, repayAmount decimal.Decimal, path1 []common.Address, path2 []common.Address) (common.Address, error) {
 	var pair1, pair2 common.Address
 	var err error
 	len1 := len(path1)
@@ -2082,7 +2086,7 @@ func (s *Syncer) selectFlashLoanFrom(repaySymbol string, repayAmount decimal.Dec
 		}
 	}
 
-	bep20, err := venus.NewBep20(s.tokens[repaySymbol].UnderlyingAddress, s.c)
+	bep20, err := venus.NewBep20(repayUnderlyingAddress, s.c)
 	if err != nil {
 		return common.Address{}, err
 	}
