@@ -418,7 +418,7 @@ func (s *Syncer) syncMarketsAndPrices() {
 			//fmt.Printf("%v th sync markers and prices @ %v\n", count, time.Now())
 			count++
 			s.doSyncMarketsAndPrices()
-			t.Reset(time.Second * 1)
+			t.Reset(time.Second * 3)
 		case <-s.forceUpdatePricesCh:
 			s.doSyncMarketsAndPrices()
 		}
@@ -488,9 +488,8 @@ func (s *Syncer) doSyncMarketsAndPrices() {
 		}()
 	}
 	wg.Wait()
-	height, _ := s.c.BlockNumber(context.Background())
-
-	fmt.Printf("doSyncMarketsAndPrices, height:%v, vBNB:%v, vETH:%v, vBTC:%v, vBUSD:%v, vDOGE:%v, vXVS:%v\n", height, s.tokens["vBNB"].Price, s.tokens["vETH"].Price, s.tokens["vBTC"].Price, s.tokens["vBUSD"].Price, s.tokens["vDOGE"].Price, s.tokens["vXVS"].Price)
+	//height, _ := s.c.BlockNumber(context.Background())
+	//fmt.Printf("doSyncMarketsAndPrices, height:%v, vBNB:%v, vETH:%v, vBTC:%v, vBUSD:%v, vDOGE:%v, vXVS:%v\n", height, s.tokens["vBNB"].Price, s.tokens["vETH"].Price, s.tokens["vBTC"].Price, s.tokens["vBUSD"].Price, s.tokens["vDOGE"].Price, s.tokens["vXVS"].Price)
 
 }
 
@@ -557,7 +556,7 @@ func (s *Syncer) doFeededPrices(feededPrices *FeededPrices) {
 			}
 		}
 		iter.Release()
-		fmt.Printf("doFeededPrices, symbol:%v, feededPrice:%v, accounts:%v\n", symbol, feededPrice, accounts)
+		//fmt.Printf("doFeededPrices, symbol:%v, feededPrice:%v, accounts:%v\n", symbol, feededPrice, accounts)
 	}
 
 	var wg sync.WaitGroup
@@ -1063,7 +1062,6 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 	}
 
 	maxLoanValue := decimal.NewFromInt(0)
-	fmt.Printf("\n")
 	for _, market := range markets {
 		errCode, bigBalance, bigBorrow, bigExchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
 		if err != nil {
@@ -1105,7 +1103,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 			LoanValue:    loan,
 		}
 
-		fmt.Printf("syncOneAccount, symbol:%v, price:%v, exchangeRate:%v, asset:%+v\n", symbol, price, bigExchangeRate, asset)
+		//fmt.Printf("syncOneAccount, symbol:%v, price:%v, exchangeRate:%v, asset:%+v\n", symbol, price, bigExchangeRate, asset)
 		assets = append(assets, asset)
 		if loan.Cmp(maxLoanValue) == 1 {
 			maxLoanValue = loan
@@ -1129,7 +1127,6 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 	}
 	currentHeight, _ := s.c.BlockNumber(context.Background())
 	fmt.Printf("syncOneAccount,account:%v, height:%v,totalCollateral:%v, totalLoan:%v,info:%+v\n", account, currentHeight, totalCollateral, totalLoan, info.toReadable())
-	fmt.Printf("\n")
 	if healthFactor.Cmp(Decimal1P1) == -1 {
 		cinfo := &ConcernedAccountInfo{
 			Address:     account,
@@ -1243,7 +1240,7 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 			BalanceValue: balanceValue,
 			LoanValue:    loan,
 		}
-		fmt.Printf("syncOneAccountWithFeededPrices, symbol:%v, exchangeRate:%v,price:%v, asset:%+v\n", symbol, exchangeRate, price, asset)
+		//fmt.Printf("syncOneAccountWithFeededPrices, symbol:%v, exchangeRate:%v,price:%v, asset:%+v\n", symbol, exchangeRate, price, asset)
 		assets = append(assets, asset)
 
 		if loan.Cmp(maxLoanValue) == 1 {
