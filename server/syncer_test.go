@@ -2398,3 +2398,9 @@ func TestCheckChannelElementWithoutRead(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestDecmialFloat(t *testing.T) {
+	value1 := decimal.New(5, -2)
+	value2, _ := decimal.NewFromString("0.05")
+	require.Equal(t, value1, value2)
+}

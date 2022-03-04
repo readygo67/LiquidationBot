@@ -42,12 +42,15 @@ const (
 )
 
 type TokenInfo struct {
-	Address            common.Address
-	UnderlyingAddress  common.Address
-	UnderlyingDecimals uint8
-	CollateralFactor   decimal.Decimal
-	Price              decimal.Decimal
-	Oracle             common.Address
+	Address               common.Address
+	UnderlyingAddress     common.Address
+	UnderlyingDecimals    uint8
+	CollateralFactor      decimal.Decimal
+	Price                 decimal.Decimal
+	PriceUpdateHeight     uint64
+	FeedPrice             decimal.Decimal
+	FeedPriceUpdateHeihgt uint64
+	Oracle                common.Address
 }
 
 type Asset struct {
@@ -83,6 +86,7 @@ type ReadableAccountInfo struct {
 }
 
 type FeededPrice struct {
+	Symbol  string
 	Address common.Address
 	Price   decimal.Decimal
 	Hash    common.Hash
@@ -466,11 +470,17 @@ func (s *Syncer) doSyncMarketsAndPrices() {
 				bigPrice = big.NewInt(0)
 			}
 
+			height, err := s.c.BlockNumber(context.Background())
+			if err != nil {
+				return
+			}
+
 			s.m.Lock()
 			defer s.m.Unlock()
 			if s.tokens[symbol] != nil {
 				s.tokens[symbol].CollateralFactor = decimal.NewFromBigInt(marketDetail.CollateralFactorMantissa, 0)
 				s.tokens[symbol].Price = decimal.NewFromBigInt(bigPrice, 0)
+				s.tokens[symbol].PriceUpdateHeight = height
 			} else {
 				fmt.Printf("a new symbol:%v added, please restart venusd\n", symbol)
 			}
@@ -480,13 +490,7 @@ func (s *Syncer) doSyncMarketsAndPrices() {
 	wg.Wait()
 	height, _ := s.c.BlockNumber(context.Background())
 
-	/*
-		{Symbol:vBNB Balance:4959739999 Loan:3060516716829526968 BalanceValue:435698669662415042477.5566923010238797 LoanValue:1246079514273667515299.43624672}
-		{Symbol:vETH Balance:40110372545 Loan:4835244370034888009 BalanceValue:23537664876807968368926.1857421673701935 LoanValue:14041259535919112684855.46}
-		{Symbol:vBTC Balance:4635011767 Loan:570854728792404703 BalanceValue:40636611483909285218027.9182222805969691 LoanValue:24768147927540960544964.49}
-		{Symbol:vBUSD Balance:0 Loan:8313815140748913950270 BalanceValue:0 LoanValue:8314006774187908212736.5537235}]}}
-	*/
-	fmt.Printf("doSyncMarketsAndPrices, height:%v, vBNB:%v, vETH:%v, vBTC:%v, vBUSD:%v\n", height, s.tokens["vBNB"].Price, s.tokens["vETH"].Price, s.tokens["vBTC"].Price, s.tokens["vBUSD"].Price)
+	fmt.Printf("doSyncMarketsAndPrices, height:%v, vBNB:%v, vETH:%v, vBTC:%v, vBUSD:%v, vDOGE:%v, vXVS:%v\n", height, s.tokens["vBNB"].Price, s.tokens["vETH"].Price, s.tokens["vBTC"].Price, s.tokens["vBUSD"].Price, s.tokens["vDOGE"].Price, s.tokens["vXVS"].Price)
 
 }
 
@@ -505,6 +509,26 @@ func (s *Syncer) feedPrices() {
 func (s *Syncer) doFeededPrices(feededPrices *FeededPrices) {
 	db := s.db
 	var accounts []common.Address
+
+	s.m.Lock()
+	tokens := s.tokens
+	symbols := s.symbols
+	s.m.Unlock()
+
+	for _, feededPrice := range feededPrices.Prices {
+		symbol := symbols[feededPrice.Address]
+		price := tokens[symbol].Price
+		priceDeltaRatio := price.Sub(feededPrice.Price).Abs().Div(price)
+		if priceDeltaRatio.Cmp(decimal.New(5, -2)) == 1 {
+			fmt.Printf("doFeededPrices, sybmol:%v feedPrices vibration %v exceeds 5 percent, height%v\n", symbol, priceDeltaRatio, feededPrices.Height)
+			return
+		}
+
+		s.m.Lock()
+		s.tokens[symbol].FeedPrice = feededPrice.Price
+		s.tokens[symbol].FeedPriceUpdateHeihgt = feededPrices.Height
+		s.m.Unlock()
+	}
 
 	for _, feededPrice := range feededPrices.Prices {
 		symbol := s.symbols[feededPrice.Address]
@@ -911,7 +935,12 @@ func (s *Syncer) monitorTxPool() {
 	aggregatorABI, _ := venus.AggregatorMetaData.GetAbi()
 	OracleToVTokenMap := make(map[common.Address]common.Address)
 
-	for symbol, token := range s.tokens {
+	s.m.Lock()
+	symbols := copySymbols(s.symbols)
+	tokens := copyTokens(s.tokens)
+	s.m.Unlock()
+
+	for symbol, token := range tokens {
 		if symbol != "vCAN" {
 			OracleToVTokenMap[token.Oracle] = token.Address
 		}
@@ -949,13 +978,17 @@ func (s *Syncer) monitorTxPool() {
 					numberingmid := numbering[len(numbering)/2 : len(numbering)/2+32]
 					bigFeededPrice := big.NewInt(0).SetBytes(numberingmid)
 
+					symobl := symbols[vTokenAddress]
+					decimalDelta := 10 + 18 - tokens[symobl].UnderlyingDecimals //VenusChainlinkOracle.sol line46
+
 					feededPrice := FeededPrice{
+						Symbol:  symobl,
 						Address: vTokenAddress,
-						Price:   decimal.NewFromBigInt(bigFeededPrice, 10),
+						Price:   decimal.NewFromBigInt(bigFeededPrice, int32(decimalDelta)),
 						Hash:    txHash,
 					}
 
-					fmt.Printf("catch feedPrice, height:%v, symbol:%v, price:%+v\n", height, s.symbols[vTokenAddress], feededPrice)
+					fmt.Printf("catch feedPrice, height:%v, symbol:%v, price:%+v\n", height, symobl, feededPrice)
 					s.feededPricesCh <- &FeededPrices{
 						Prices: []FeededPrice{feededPrice},
 						Height: height,
@@ -1170,7 +1203,12 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 
 		symbol := symbols[market]
 		collateralFactor := tokens[symbol].CollateralFactor
+
+		//use latest price event it is pending
 		price := tokens[symbol].Price
+		if tokens[symbol].FeedPriceUpdateHeihgt > tokens[symbol].PriceUpdateHeight {
+			price = tokens[symbol].FeedPrice
+		}
 
 		//apply feeded prices if exist
 		for _, feededPrice := range feededPrices.Prices {
@@ -1180,9 +1218,6 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 				price = feededPrice.Price
 			}
 		}
-		
-		priceDelta := price.Sub(feededPrices.Prices[0].Price)
-		fmt.Printf("priceDelta, symbol:%v, delta:%v\n", symbol, priceDelta.Div(EXPSACLE))
 
 		exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
 		balance := decimal.NewFromBigInt(bigBalance, 0)
@@ -1328,9 +1363,9 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	pancakeFactory := s.pancakeFactory
 	account := liquidation.Address
 	db := s.db
-	feedPrices := liquidation.FeedPrices
+	feededPrices := liquidation.FeedPrices
 	withFeedPrice := false
-	if len(feedPrices.Prices) != 0 {
+	if len(feededPrices.Prices) != 0 {
 		withFeedPrice = true
 	}
 
@@ -1371,19 +1406,6 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 		db.Delete(dbm.BadLiquidationTx(account.Bytes()), nil)
 	}
 
-	if !withFeedPrice {
-		errCode, _, shortfall, err := comptroller.GetAccountLiquidity(callOptions, account)
-		if err != nil {
-			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAccountLiquidity, account:%v, err:%v \n", account, err)
-			return err
-		}
-		if errCode.Cmp(BigZero) != 0 || shortfall.Cmp(BigZero) != 1 {
-			err := fmt.Errorf("calculateSeizedTokenAmount, fail to get GetAccountLiquidity, account:%v, errCode:%v, shortfall:%v \n", account, errCode, shortfall)
-			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAccountLiquidity, account:%v, errCode:%v, shortfall:%v \n", account, errCode, shortfall)
-			return err
-		}
-	}
-
 	totalCollateral := decimal.NewFromInt(0)
 	totalLoan := decimal.NewFromInt(0)
 
@@ -1422,10 +1444,17 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 		collateralFactor := tokens[symbol].CollateralFactor
 		price := tokens[symbol].Price
 
+		if tokens[symbol].FeedPriceUpdateHeihgt > tokens[symbol].PriceUpdateHeight {
+			withFeedPrice = true
+			price = tokens[symbol].FeedPrice
+		}
+
 		//use feedprice if exist
-		for _, feedPrice := range feedPrices.Prices {
-			if feedPrice.Address.String() == market.String() {
-				price = feedPrice.Price
+		for _, feededPrice := range feededPrices.Prices {
+			if s.symbols[feededPrice.Address] == symbol {
+				price = feededPrice.Price
+			} else if strings.Contains(s.symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
+				price = feededPrice.Price
 			}
 		}
 
@@ -1459,6 +1488,20 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	totalLoan = totalLoan.Add(mintedVAIS)
 	fmt.Printf("account:%v, totalCollateralValue:%v, mintedVAISValue:%v, totalLoanValue:%v, calculatedshortfall:%v\n", account, totalCollateral.Div(EXPSACLE), mintedVAIS.Div(EXPSACLE), totalLoan.Div(EXPSACLE), (totalLoan.Sub(totalCollateral)))
 	fmt.Printf("account:%v, assets:%v\n", account, assets)
+
+	if !withFeedPrice {
+		errCode, _, shortfall, err := comptroller.GetAccountLiquidity(callOptions, account)
+		if err != nil {
+			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAccountLiquidity, account:%v, err:%v \n", account, err)
+			return err
+		}
+		if errCode.Cmp(BigZero) != 0 || shortfall.Cmp(BigZero) != 1 {
+			err := fmt.Errorf("calculateSeizedTokenAmount, fail to get GetAccountLiquidity, account:%v, errCode:%v, shortfall:%v \n", account, errCode, shortfall)
+			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAccountLiquidity, account:%v, errCode:%v, shortfall:%v \n", account, errCode, shortfall)
+			return err
+		}
+	}
+
 	//select the repayed token and seized collateral token
 	maxLoanValue := decimal.NewFromInt(0)
 	maxLoanSymbol := ""
