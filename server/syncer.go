@@ -305,6 +305,13 @@ func NewSyncer(
 					panic(err)
 				}
 
+				//feedDecimal, err := priceFeed.Decimals(nil)
+				//if err != nil {
+				//	panic(err)
+				//}
+
+				//fmt.Printf("%v feeddecimal:%v\n", symbol, feedDecimal)
+
 				finalOracle, err = priceFeed.Aggregator(nil)
 				//fmt.Printf("symbol:%v, priceFeed:%v, oracle:%v\n", symbol, feedAddr, finalOracle)
 				if err != nil {
@@ -501,11 +508,29 @@ func (s *Syncer) doFeededPrices(feededPrices *FeededPrices) {
 
 	for _, feededPrice := range feededPrices.Prices {
 		symbol := s.symbols[feededPrice.Address]
+		symbol2 := ""
+
+		if symbol == "vBETH" {
+			symbol2 = "vETH"
+		}
+		if symbol == "vETH" {
+			symbol2 = "vBETH"
+		}
+
 		prefix := append(dbm.MarketPrefix, []byte(symbol)...)
 		iter := db.NewIterator(util.BytesPrefix(prefix), nil)
 		for iter.Next() {
 			account := common.BytesToAddress(iter.Value())
 			accounts = append(accounts, account)
+		}
+
+		if symbol2 != "" {
+			prefix2 := append(dbm.MarketPrefix, []byte(symbol2)...)
+			iter = db.NewIterator(util.BytesPrefix(prefix2), nil)
+			for iter.Next() {
+				account := common.BytesToAddress(iter.Value())
+				accounts = append(accounts, account)
+			}
 		}
 		iter.Release()
 		fmt.Printf("doFeededPrices, symbol:%v, feededPrice:%v, accounts:%v\n", symbol, feededPrice, accounts)
@@ -1065,9 +1090,9 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 		MaxLoanValue: maxLoanValue,
 		Assets:       assets,
 	}
-        currentHeight, _ := s.c.BlockNumber(context.Background())
-        fmt.Printf("syncOneAccount,account:%v, height:%v,totalCollateral:%v, totalLoan:%v,info:%+v\n", account, currentHeight, totalCollateral, totalLoan, info.toReadable())
-        fmt.Printf("\n")
+	currentHeight, _ := s.c.BlockNumber(context.Background())
+	fmt.Printf("syncOneAccount,account:%v, height:%v,totalCollateral:%v, totalLoan:%v,info:%+v\n", account, currentHeight, totalCollateral, totalLoan, info.toReadable())
+	fmt.Printf("\n")
 	if healthFactor.Cmp(Decimal1P1) == -1 {
 		cinfo := &ConcernedAccountInfo{
 			Address:     account,
@@ -1149,10 +1174,15 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 
 		//apply feeded prices if exist
 		for _, feededPrice := range feededPrices.Prices {
-			if tokens[symbol].Address == feededPrice.Address {
+			if s.symbols[feededPrice.Address] == symbol {
+				price = feededPrice.Price
+			} else if strings.Contains(s.symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
 				price = feededPrice.Price
 			}
 		}
+		
+		priceDelta := price.Sub(feededPrices.Prices[0].Price)
+		fmt.Printf("priceDelta, symbol:%v, delta:%v\n", symbol, priceDelta.Div(EXPSACLE))
 
 		exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
 		balance := decimal.NewFromBigInt(bigBalance, 0)
@@ -1174,7 +1204,7 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 			BalanceValue: balanceValue,
 			LoanValue:    loan,
 		}
-		fmt.Printf("syncOneAccountWithFeededPrices, symbol:%v, exchangeRate:%v,price:%v, asset:%+v\n", symbol, exchangeRate,price, asset)
+		fmt.Printf("syncOneAccountWithFeededPrices, symbol:%v, exchangeRate:%v,price:%v, asset:%+v\n", symbol, exchangeRate, price, asset)
 		assets = append(assets, asset)
 
 		if loan.Cmp(maxLoanValue) == 1 {
@@ -1198,8 +1228,8 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 		Assets:       assets,
 	}
 
-        currentHeight, _ := s.c.BlockNumber(context.Background())
-	fmt.Printf("syncOneAccountWithFeededPrices,account:%v, height:%v,  totalCollateral:%v, totalLoan:%v, info:%+v\n",account, currentHeight, totalCollateral, totalLoan, info.toReadable())
+	currentHeight, _ := s.c.BlockNumber(context.Background())
+	fmt.Printf("syncOneAccountWithFeededPrices,account:%v, height:%v,  totalCollateral:%v, totalLoan:%v, info:%+v\n", account, currentHeight, totalCollateral, totalLoan, info.toReadable())
 	if healthFactor.Cmp(Decimal1P1) == -1 {
 		cinfo := &ConcernedAccountInfo{
 			Address:      account,
@@ -2044,32 +2074,37 @@ func (s *Syncer) selectFlashLoanFrom(repaySymbol string, repayAmount decimal.Dec
 //_flashLoanAmount ： 借多少？ 还多少？
 
 func (s *Syncer) doLiquidation(scenarioNo *big.Int, flashLoanFrom common.Address, path1 []common.Address, path2 []common.Address, tokens []common.Address, flashLoanAmount *big.Int, gasPrice *big.Int, gasLimit uint64) (*types.Transaction, error) {
-	publicKey := s.PrivateKey.Public()
-	publicKeyECDSA, _ := publicKey.(*ecdsa.PublicKey)
+	fmt.Printf("send dummy liquidation\n")
+	return nil, nil
 
-	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
-	nonce, err := s.c.PendingNonceAt(context.Background(), fromAddress)
-	if err != nil {
-		return nil, err
-	}
+	//publicKey := s.PrivateKey.Public()
+	//publicKeyECDSA, _ := publicKey.(*ecdsa.PublicKey)
+	//
+	//fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+	//nonce, err := s.c.PendingNonceAt(context.Background(), fromAddress)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//
+	//auth, _ := bind.NewKeyedTransactorWithChainID(s.PrivateKey, big.NewInt(56))
+	//auth.Value = big.NewInt(0)
+	//
+	//auth.Nonce = big.NewInt(int64(nonce))
+	//auth.GasPrice = gasPrice
+	//auth.GasLimit = gasLimit
+	//
+	//fmt.Printf("send dummy liquidation\n")
+	//return nil, nil
+	//tx, err := s.liquidator.Qingsuan(auth, scenarioNo, flashLoanFrom, path1, path2, tokens, flashLoanAmount)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//
+	//if tx == nil {
+	//	return nil, fmt.Errorf("empty tx")
+	//}
 
-	auth, _ := bind.NewKeyedTransactorWithChainID(s.PrivateKey, big.NewInt(56))
-	auth.Value = big.NewInt(0)
-
-	auth.Nonce = big.NewInt(int64(nonce))
-	auth.GasPrice = gasPrice
-	auth.GasLimit = gasLimit
-
-	tx, err := s.liquidator.Qingsuan(auth, scenarioNo, flashLoanFrom, path1, path2, tokens, flashLoanAmount)
-	if err != nil {
-		return nil, err
-	}
-
-	if tx == nil {
-		return nil, fmt.Errorf("empty tx")
-	}
-
-	return tx, nil
+	//return tx, nil
 }
 
 func (info *AccountInfo) toReadable() ReadableAccountInfo {
