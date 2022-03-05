@@ -36,7 +36,7 @@ const (
 	SyncIntervalBelow1P5             = 9
 	SyncIntervalBelow2P0             = 18
 	SyncIntervalAbove2P0             = 60
-	SyncIntervalNoProfit             = 60
+	SyncIntervalNoProfit             = 3600
 	MonitorLiquidationInterval       = 120
 	ForbiddenPeriodForBadLiquidation = 200 //200 block
 )
@@ -383,15 +383,15 @@ func (s *Syncer) Start() {
 	log.Info("server start")
 	fmt.Println("server start")
 
-	s.wg.Add(13)
+	s.wg.Add(8)
 	go s.syncMarketsAndPrices()
 	go s.feedPrices()
 	go s.syncAllBorrowers()
-	go s.syncLiquidationBelow1P0()
-	go s.syncLiquidationBelow1P1()
-	go s.syncLiquidationBelow1P5()
-	go s.syncLiquidationBelow2P0()
-	go s.syncLiquidationAbove2P0()
+	//go s.syncLiquidationBelow1P0()
+	//go s.syncLiquidationBelow1P1()
+	//go s.syncLiquidationBelow1P5()
+	//go s.syncLiquidationBelow2P0()
+	//go s.syncLiquidationAbove2P0()
 	go s.syncLiquidationNonProfit()
 	go s.monitorLiquidationEvent()
 	go s.printConcernedAccountInfo()
@@ -1009,8 +1009,8 @@ func (s *Syncer) printConcernedAccountInfo() {
 		select {
 		case <-s.quitCh:
 			return
-		case <-s.concernedAccountInfoCh:
-			//fmt.Printf("ConernedAccountInfo:%+v\n", info)
+		case info :=<-s.concernedAccountInfoCh:
+			fmt.Printf("ConernedAccountInfo:%+v\n", info)
 		}
 	}
 }
@@ -1126,7 +1126,7 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 		Assets:       assets,
 	}
 	currentHeight, _ := s.c.BlockNumber(context.Background())
-	fmt.Printf("syncOneAccount,account:%v, height:%v,totalCollateral:%v, totalLoan:%v,info:%+v\n", account, currentHeight, totalCollateral, totalLoan, info.toReadable())
+	//fmt.Printf("syncOneAccount,account:%v, height:%v,totalCollateral:%v, totalLoan:%v,info:%+v\n", account, currentHeight, totalCollateral, totalLoan, info.toReadable())
 	if healthFactor.Cmp(Decimal1P1) == -1 {
 		cinfo := &ConcernedAccountInfo{
 			Address:     account,
@@ -1265,7 +1265,7 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 	}
 
 	currentHeight, _ := s.c.BlockNumber(context.Background())
-	fmt.Printf("syncOneAccountWithFeededPrices,account:%v, height:%v,  totalCollateral:%v, totalLoan:%v, info:%+v\n", account, currentHeight, totalCollateral, totalLoan, info.toReadable())
+	//fmt.Printf("syncOneAccountWithFeededPrices,account:%v, height:%v,  totalCollateral:%v, totalLoan:%v, info:%+v\n", account, currentHeight, totalCollateral, totalLoan, info.toReadable())
 	if healthFactor.Cmp(Decimal1P1) == -1 {
 		cinfo := &ConcernedAccountInfo{
 			Address:      account,
@@ -1650,13 +1650,13 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				fmt.Printf("case6, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				tx, err := s.doLiquidation(big.NewInt(6), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				_, err = s.doLiquidation(big.NewInt(6), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
 					fmt.Printf("doLiquidation error:%v\n", err)
 					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
 					return err
 				}
-				fmt.Printf("tx success, hash:%v", tx.Hash())
+				//fmt.Printf("tx success, hash:%v", tx.Hash())
 			}
 		} else {
 			//case7, repay VAI and seizedSymbol is not stable coin. sell partly seizedSymbol to repay symbol, sell remain to usdt
@@ -1694,13 +1694,13 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				fmt.Printf("case7: profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				tx, err := s.doLiquidation(big.NewInt(7), flashLoanFrom, path1, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				_, err = s.doLiquidation(big.NewInt(7), flashLoanFrom, path1, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
 					fmt.Printf("doLiquidation error:%v\n", err)
 					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
 					return err
 				}
-				fmt.Printf("tx success, hash:%v", tx.Hash())
+				//fmt.Printf("tx success, hash:%v", tx.Hash())
 			}
 		}
 		return nil
@@ -1732,13 +1732,13 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				fmt.Printf("case1, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				tx, err := s.doLiquidation(big.NewInt(1), flashLoanFrom, nil, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				_, err = s.doLiquidation(big.NewInt(1), flashLoanFrom, nil, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
 					fmt.Printf("doLiquidation error:%v\n", err)
 					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
 					return err
 				}
-				fmt.Printf("tx success, hash:%v", tx.Hash())
+				//fmt.Printf("tx success, hash:%v", tx.Hash())
 
 			}
 		} else {
@@ -1767,13 +1767,13 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				fmt.Printf("case2, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				tx, err := s.doLiquidation(big.NewInt(2), flashLoanFrom, nil, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				_, err = s.doLiquidation(big.NewInt(2), flashLoanFrom, nil, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
 					fmt.Printf("doLiquidation error:%v\n", err)
 					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
 					return err
 				}
-				fmt.Printf("tx success, hash:%v", tx.Hash())
+				//fmt.Printf("tx success, hash:%v", tx.Hash())
 			}
 		}
 		return nil
@@ -1804,13 +1804,13 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 		if profit.Cmp(ProfitThreshold) == 1 {
 			fmt.Printf("case3, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-			tx, err := s.doLiquidation(big.NewInt(3), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+			_, err = s.doLiquidation(big.NewInt(3), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 			if err != nil {
 				fmt.Printf("doLiquidation error:%v\n", err)
 				db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
 				return err
 			}
-			fmt.Printf("tx success, hash:%v", tx.Hash())
+			//fmt.Printf("tx success, hash:%v", tx.Hash())
 		}
 	} else {
 		if isStalbeCoin(repaySymbol) {
@@ -1838,13 +1838,13 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				fmt.Printf("case4, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				tx, err := s.doLiquidation(big.NewInt(4), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				_, err = s.doLiquidation(big.NewInt(4), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
 					fmt.Printf("doLiquidation error:%v\n", err)
 					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
 					return err
 				}
-				fmt.Printf("tx success, hash:%v", tx.Hash())
+				//fmt.Printf("tx success, hash:%v", tx.Hash())
 			}
 		} else {
 			//case5,  collateral(i.e. seizedSymbol) and repaySymbol are not stable coin. sell partly seizedSymbol to repay symbol, sell remain to usdt
@@ -1879,13 +1879,13 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				fmt.Printf("case5: profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				tx, err := s.doLiquidation(big.NewInt(5), flashLoanFrom, path1, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				_, err = s.doLiquidation(big.NewInt(5), flashLoanFrom, path1, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
 					fmt.Printf("doLiquidation error:%v\n", err)
 					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
 					return err
 				}
-				fmt.Printf("tx success, hash:%v", tx.Hash())
+				//fmt.Printf("tx success, hash:%v", tx.Hash())
 			}
 		}
 	}
