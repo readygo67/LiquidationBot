@@ -2085,37 +2085,34 @@ func (s *Syncer) checkPendingLiquidation(account common.Address, currentHeight u
 //_flashLoanAmount ： 借多少？ 还多少？
 
 func (s *Syncer) doLiquidation(scenarioNo *big.Int, flashLoanFrom common.Address, path1 []common.Address, path2 []common.Address, tokens []common.Address, flashLoanAmount *big.Int, gasPrice *big.Int, gasLimit uint64) (*types.Transaction, error) {
+	publicKey := s.PrivateKey.Public()
+	publicKeyECDSA, _ := publicKey.(*ecdsa.PublicKey)
+
+	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+	nonce, err := s.c.PendingNonceAt(context.Background(), fromAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	auth, _ := bind.NewKeyedTransactorWithChainID(s.PrivateKey, big.NewInt(56))
+	auth.Value = big.NewInt(0)
+
+	auth.Nonce = big.NewInt(int64(nonce))
+	auth.GasPrice = gasPrice
+	auth.GasLimit = gasLimit
+
 	logger.Printf("send dummy liquidation\n")
 	return nil, nil
+	tx, err := s.liquidator.Qingsuan(auth, scenarioNo, flashLoanFrom, path1, path2, tokens, flashLoanAmount)
+	if err != nil {
+		return nil, err
+	}
 
-	//publicKey := s.PrivateKey.Public()
-	//publicKeyECDSA, _ := publicKey.(*ecdsa.PublicKey)
-	//
-	//fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
-	//nonce, err := s.c.PendingNonceAt(context.Background(), fromAddress)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//
-	//auth, _ := bind.NewKeyedTransactorWithChainID(s.PrivateKey, big.NewInt(56))
-	//auth.Value = big.NewInt(0)
-	//
-	//auth.Nonce = big.NewInt(int64(nonce))
-	//auth.GasPrice = gasPrice
-	//auth.GasLimit = gasLimit
-	//
-	//logger.Printf("send dummy liquidation\n")
-	//return nil, nil
-	//tx, err := s.liquidator.Qingsuan(auth, scenarioNo, flashLoanFrom, path1, path2, tokens, flashLoanAmount)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//
-	//if tx == nil {
-	//	return nil, fmt.Errorf("empty tx")
-	//}
+	if tx == nil {
+		return nil, fmt.Errorf("empty tx")
+	}
 
-	//return tx, nil
+	return tx, nil
 }
 
 func (info *AccountInfo) toReadable() ReadableAccountInfo {
