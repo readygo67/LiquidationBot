@@ -29,17 +29,18 @@ import (
 )
 
 const (
-	ConfirmHeight                    = 0
-	ScanSpan                         = 1000
-	SyncIntervalBelow1P0             = 60 //in secs
-	SyncIntervalBelow1P1             = 60
-	SyncIntervalBelow1P5             = 360
-	SyncIntervalBelow2P0             = 720
-	SyncIntervalAbove2P0             = 1800
-	SyncIntervalBackGround           = 60
-	SyncIntervalForMarkets           = 6
-	MonitorLiquidationInterval       = 120
-	ForbiddenPeriodForBadLiquidation = 200 //200 block
+	ConfirmHeight                        = 0
+	ScanSpan                             = 1000
+	SyncIntervalBelow1P0                 = 60 //in secs
+	SyncIntervalBelow1P1                 = 60
+	SyncIntervalBelow1P5                 = 360
+	SyncIntervalBelow2P0                 = 720
+	SyncIntervalAbove2P0                 = 1800
+	SyncIntervalBackGround               = 60
+	SyncIntervalForMarkets               = 6
+	MonitorLiquidationInterval           = 120
+	ForbiddenPeriodForBadLiquidation     = 200 //200 block
+	ForbiddenPeriodForPendingLiquidation = 200
 )
 
 type TokenInfo struct {
@@ -1314,25 +1315,16 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 	callOptions := &bind.CallOpts{
 		BlockNumber: big.NewInt(int64(currentHeight)),
 	}
-	had, err := db.Has(dbm.BadLiquidationTx(account.Bytes()), nil)
+	//check BadLiquidationTx
+	err = s.checkBadLiquidation(account, currentHeight)
 	if err != nil {
-		fmt.Printf("processLiquidationReq, fail to get BadLiquidationTx,err:%v\n", err)
 		return err
 	}
-	if had {
-		bz, err := db.Get(dbm.BadLiquidationTx(account.Bytes()), nil)
-		if err != nil {
-			fmt.Printf("processLiquidationReq, fail to get BadLiquidationTx,err:%v\n", err)
-			return err
-		}
 
-		recordHeight := big.NewInt(0).SetBytes(bz).Uint64()
-		if currentHeight-recordHeight <= ForbiddenPeriodForBadLiquidation {
-			err = fmt.Errorf("forbidden %v liquidation temporay, currentHeight:%v, recordHeight:%v\n", account, currentHeight, recordHeight)
-			fmt.Printf("forbidden %v liquidation temporay, currentHeight:%v, recordHeight:%v\n", account, currentHeight, recordHeight)
-			return err
-		}
-		db.Delete(dbm.BadLiquidationTx(account.Bytes()), nil)
+	//check PendingLiquidationTx
+	err = s.checkPendingLiquidation(account, currentHeight)
+	if err != nil {
+		return err
 	}
 
 	totalCollateral := decimal.NewFromInt(0)
@@ -1377,15 +1369,6 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 			withFeedPrice = true
 			price = tokens[symbol].FeedPrice
 		}
-
-		//use feedprice if exist
-		//for _, feededPrice := range feededPrices.Prices {
-		//	if symbols[feededPrice.Address] == symbol {
-		//		price = feededPrice.Price
-		//	} else if strings.Contains(symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
-		//		price = feededPrice.Price
-		//	}
-		//}
 
 		exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
 		balance := decimal.NewFromBigInt(bigBalance, 0) //vToken Amount
@@ -1578,13 +1561,17 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				fmt.Printf("case6, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				_, err = s.doLiquidation(big.NewInt(6), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				tx, err := s.doLiquidation(big.NewInt(6), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
 					fmt.Printf("doLiquidation error:%v\n", err)
-					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+					db.Put(dbm.BadLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
 					return err
 				}
-				//fmt.Printf("tx success, hash:%v", tx.Hash())
+				if tx != nil {
+					fmt.Printf("tx success, hash:%v\n", tx.Hash())
+					db.Put(dbm.PendingLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+				}
+
 			}
 		} else {
 			//case7, repay VAI and seizedSymbol is not stable coin. sell partly seizedSymbol to repay symbol, sell remain to usdt
@@ -1622,13 +1609,16 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				fmt.Printf("case7: profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				_, err = s.doLiquidation(big.NewInt(7), flashLoanFrom, path1, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				tx, err := s.doLiquidation(big.NewInt(7), flashLoanFrom, path1, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
 					fmt.Printf("doLiquidation error:%v\n", err)
-					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+					db.Put(dbm.BadLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
 					return err
 				}
-				//fmt.Printf("tx success, hash:%v", tx.Hash())
+				if tx != nil {
+					fmt.Printf("tx success, hash:%v\n", tx.Hash())
+					db.Put(dbm.PendingLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+				}
 			}
 		}
 		return nil
@@ -1660,13 +1650,16 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				fmt.Printf("case1, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				_, err = s.doLiquidation(big.NewInt(1), flashLoanFrom, nil, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				tx, err := s.doLiquidation(big.NewInt(1), flashLoanFrom, nil, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
 					fmt.Printf("doLiquidation error:%v\n", err)
-					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+					db.Put(dbm.BadLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
 					return err
 				}
-				//fmt.Printf("tx success, hash:%v", tx.Hash())
+				if tx != nil {
+					fmt.Printf("tx success, hash:%v\n", tx.Hash())
+					db.Put(dbm.PendingLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+				}
 
 			}
 		} else {
@@ -1695,13 +1688,16 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				fmt.Printf("case2, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				_, err = s.doLiquidation(big.NewInt(2), flashLoanFrom, nil, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				tx, err := s.doLiquidation(big.NewInt(2), flashLoanFrom, nil, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
 					fmt.Printf("doLiquidation error:%v\n", err)
-					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+					db.Put(dbm.BadLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
 					return err
 				}
-				//fmt.Printf("tx success, hash:%v", tx.Hash())
+				if tx != nil {
+					fmt.Printf("tx success, hash:%v\n", tx.Hash())
+					db.Put(dbm.PendingLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+				}
 			}
 		}
 		return nil
@@ -1732,13 +1728,16 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 		if profit.Cmp(ProfitThreshold) == 1 {
 			fmt.Printf("case3, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-			_, err = s.doLiquidation(big.NewInt(3), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+			tx, err := s.doLiquidation(big.NewInt(3), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 			if err != nil {
 				fmt.Printf("doLiquidation error:%v\n", err)
-				db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+				db.Put(dbm.BadLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
 				return err
 			}
-			//fmt.Printf("tx success, hash:%v", tx.Hash())
+			if tx != nil {
+				fmt.Printf("tx success, hash:%v\n", tx.Hash())
+				db.Put(dbm.PendingLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+			}
 		}
 	} else {
 		if isStalbeCoin(repaySymbol) {
@@ -1766,13 +1765,16 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				fmt.Printf("case4, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				_, err = s.doLiquidation(big.NewInt(4), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				tx, err := s.doLiquidation(big.NewInt(4), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
 					fmt.Printf("doLiquidation error:%v\n", err)
-					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+					db.Put(dbm.BadLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
 					return err
 				}
-				//fmt.Printf("tx success, hash:%v", tx.Hash())
+				if tx != nil {
+					fmt.Printf("tx success, hash:%v\n", tx.Hash())
+					db.Put(dbm.PendingLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+				}
 			}
 		} else {
 			//case5,  collateral(i.e. seizedSymbol) and repaySymbol are not stable coin. sell partly seizedSymbol to repay symbol, sell remain to usdt
@@ -1807,13 +1809,16 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				fmt.Printf("case5: profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				_, err = s.doLiquidation(big.NewInt(5), flashLoanFrom, path1, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				tx, err := s.doLiquidation(big.NewInt(5), flashLoanFrom, path1, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
 				if err != nil {
 					fmt.Printf("doLiquidation error:%v\n", err)
-					db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+					db.Put(dbm.BadLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
 					return err
 				}
-				//fmt.Printf("tx success, hash:%v", tx.Hash())
+				if tx != nil {
+					fmt.Printf("tx success, hash:%v\n", tx.Hash())
+					db.Put(dbm.PendingLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+				}
 			}
 		}
 	}
@@ -2007,6 +2012,57 @@ func (s *Syncer) selectFlashLoanFrom(repaySymbol string, repayUnderlyingAddress 
 	}
 
 	return common.Address{}, fmt.Errorf("no flashLoanFrom")
+}
+
+func (s *Syncer) checkBadLiquidation(account common.Address, currentHeight uint64) error {
+	db := s.db
+	had, err := db.Has(dbm.BadLiquidationTxStoreKey(account.Bytes()), nil)
+	if err != nil {
+		fmt.Printf("checkBadLiquidation, fail to get BadLiquidationTx,err:%v\n", err)
+		return err
+	}
+	if had {
+		bz, err := db.Get(dbm.BadLiquidationTxStoreKey(account.Bytes()), nil)
+		if err != nil {
+			fmt.Printf("checkBadLiquidation, fail to get BadLiquidationTx,err:%v\n", err)
+			return err
+		}
+
+		recordHeight := big.NewInt(0).SetBytes(bz).Uint64()
+		if currentHeight-recordHeight <= ForbiddenPeriodForBadLiquidation {
+			err = fmt.Errorf("checkBadLiquidation, forbidden bad %v liquidation temporay, currentHeight:%v, recordHeight:%v\n", account, currentHeight, recordHeight)
+			fmt.Printf("checkBadLiquidation, forbidden bad %v liquidation temporay, currentHeight:%v, recordHeight:%v\n", account, currentHeight, recordHeight)
+			return err
+		}
+		db.Delete(dbm.BadLiquidationTxStoreKey(account.Bytes()), nil)
+	}
+	return nil
+}
+
+func (s *Syncer) checkPendingLiquidation(account common.Address, currentHeight uint64) error {
+	db := s.db
+	//PendingLiquidationTx check
+	had, err := db.Has(dbm.PendingLiquidationTxStoreKey(account.Bytes()), nil)
+	if err != nil {
+		fmt.Printf("checkPendingLiquidation, fail to get PendingLiquidationTx,err:%v\n", err)
+		return err
+	}
+	if had {
+		bz, err := db.Get(dbm.PendingLiquidationTxStoreKey(account.Bytes()), nil)
+		if err != nil {
+			fmt.Printf("checkPendingLiquidation, fail to get BadLiquidationTx,err:%v\n", err)
+			return err
+		}
+
+		recordHeight := big.NewInt(0).SetBytes(bz).Uint64()
+		if currentHeight-recordHeight <= ForbiddenPeriodForPendingLiquidation {
+			err = fmt.Errorf("checkPendingLiquidation, forbidden pending %v liquidation temporay, currentHeight:%v, recordHeight:%v\n", account, currentHeight, recordHeight)
+			fmt.Printf("checkPendingLiquidation, forbidden pending %v liquidation temporay, currentHeight:%v, recordHeight:%v\n", account, currentHeight, recordHeight)
+			return err
+		}
+		db.Delete(dbm.PendingLiquidationTxStoreKey(account.Bytes()), nil)
+	}
+	return nil
 }
 
 //situcation： 情况 1-7

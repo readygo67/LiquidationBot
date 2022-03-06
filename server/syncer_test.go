@@ -2254,8 +2254,8 @@ func TestCalculateSeizedTokenWithBadLiquidationTxInForbiddenPeriod(t *testing.T)
 		Address: account,
 	}
 	currentHeight, err := sync.c.BlockNumber(context.Background())
-	db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
-	bz, err := db.Get(dbm.BadLiquidationTx(account.Bytes()), nil)
+	db.Put(dbm.BadLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+	bz, err := db.Get(dbm.BadLiquidationTxStoreKey(account.Bytes()), nil)
 	require.NoError(t, err)
 	gotHeight := big.NewInt(0).SetBytes(bz).Uint64()
 	require.Equal(t, currentHeight, gotHeight)
@@ -2287,8 +2287,8 @@ func TestCalculateSeizedTokenWithBadLiquidationTxForbiddenPeriodExpire(t *testin
 	}
 	currentHeight, err := sync.c.BlockNumber(context.Background())
 	currentHeight -= (ForbiddenPeriodForBadLiquidation + 1)
-	db.Put(dbm.BadLiquidationTx(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
-	bz, err := db.Get(dbm.BadLiquidationTx(account.Bytes()), nil)
+	db.Put(dbm.BadLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+	bz, err := db.Get(dbm.BadLiquidationTxStoreKey(account.Bytes()), nil)
 	require.NoError(t, err)
 	gotHeight := big.NewInt(0).SetBytes(bz).Uint64()
 	require.Equal(t, currentHeight, gotHeight)
@@ -2296,7 +2296,7 @@ func TestCalculateSeizedTokenWithBadLiquidationTxForbiddenPeriodExpire(t *testin
 	err = sync.processLiquidationReq(&liquidation)
 	require.NoError(t, err)
 
-	exist, err := db.Has(dbm.BadLiquidationTx(account.Bytes()), nil)
+	exist, err := db.Has(dbm.BadLiquidationTxStoreKey(account.Bytes()), nil)
 	require.False(t, exist)
 }
 

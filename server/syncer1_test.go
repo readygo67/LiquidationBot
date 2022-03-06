@@ -79,9 +79,9 @@ func TestSyncOneAccountWithFeededPrices2(t *testing.T) {
 
 	sync.wg.Add(5)
 	go sync.SyncMarketsAndPricesLoop()
-	go sync.syncLiquidationBelow1P1()
+	go sync.BackgroundSyncLoop()
 	go sync.MonitorTxPoolLoop()
-	go sync.feedPrices()
+	go sync.ProcessFeededPricesLoop()
 	go sync.PrintConcernedAccountInfoLoop()
 
 	waitExit()
