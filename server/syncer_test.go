@@ -2002,7 +2002,7 @@ func TestScanAllBorrowers1(t *testing.T) {
 	}
 }
 
-func TestCalculateSeizedTokenCase1(t *testing.T) {
+func TestProcessLiquidationCase1(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
@@ -2034,7 +2034,7 @@ processLiquidationReq case2: seizedSymbol == repaySymbol and symbol is not stabl
 case2, profitable liquidation catched:&{0xFAbE4C180b6eDad32eA0Cf56587c54417189e422 0 0 0001-01-01 00:00:00 +0000 UTC}, profit:1.4627500066481167
 --- PASS: TestCalculateSeizedTokenCase2 (26.94s)
 */
-func TestCalculateSeizedTokenCase2(t *testing.T) {
+func TestProcessLiquidationCase2(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
@@ -2074,7 +2074,7 @@ case3, profitable liquidation catched:&{0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1E
 --- PASS: TestCalculateSeizedTokenCase3 (29.38s)
 PASS
 */
-func TestCalculateSeizedTokenCase3(t *testing.T) {
+func TestProcessLiquidationCase3(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
@@ -2095,7 +2095,7 @@ func TestCalculateSeizedTokenCase3(t *testing.T) {
 	sync.processLiquidationReq(&liquidation)
 }
 
-func TestCalculateSeizedTokenCase3_2(t *testing.T) {
+func TestProcessLiquidationCase3_2(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
@@ -2131,7 +2131,7 @@ case4, profitable liquidation catched:&{0x1002C4dB05060e4c1Bac47CeAE3c090984BdE8
 --- PASS: TestCalculateSeizedTokenCase4 (22.54s)
 PASS
 */
-func TestCalculateSeizedTokenCase4(t *testing.T) {
+func TestProcessLiquidationCase4(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
@@ -2166,7 +2166,7 @@ case5: profitable liquidation catched:&{0x0A88bbE6be0005E46F56aA4145c8FB863f9Df6
 --- PASS: TestCalculateSeizedTokenCase5 (21.05s)
 PASS
 */
-func TestCalculateSeizedTokenCase5(t *testing.T) {
+func TestProcessLiquidationCase5(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
@@ -2187,7 +2187,7 @@ func TestCalculateSeizedTokenCase5(t *testing.T) {
 	sync.processLiquidationReq(&liquidation)
 }
 
-func TestCalculateSeizedTokenCase7(t *testing.T) {
+func TestProcessLiquidationCase7(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
@@ -2208,7 +2208,7 @@ func TestCalculateSeizedTokenCase7(t *testing.T) {
 	sync.processLiquidationReq(&liquidation)
 }
 
-func TestCalculateSeizedToken1(t *testing.T) {
+func TestProcessLiquidation1(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
@@ -2233,7 +2233,7 @@ func TestCalculateSeizedToken1(t *testing.T) {
 	}
 }
 
-func TestCalculateSeizedTokenWithBadLiquidationTxInForbiddenPeriod(t *testing.T) {
+func TestProcessLiquidationWithBadLiquidationTxInForbiddenPeriod(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
@@ -2265,7 +2265,7 @@ func TestCalculateSeizedTokenWithBadLiquidationTxInForbiddenPeriod(t *testing.T)
 	t.Logf("%v", err)
 }
 
-func TestCalculateSeizedTokenWithBadLiquidationTxForbiddenPeriodExpire(t *testing.T) {
+func TestProcessLiquidationWithBadLiquidationTxForbiddenPeriodExpire(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
@@ -2297,6 +2297,73 @@ func TestCalculateSeizedTokenWithBadLiquidationTxForbiddenPeriodExpire(t *testin
 	require.NoError(t, err)
 
 	exist, err := db.Has(dbm.BadLiquidationTxStoreKey(account.Bytes()), nil)
+	require.False(t, exist)
+}
+
+func TestProcessLiquidationWithPedningLiquidationTxInForbiddenPeriod(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
+
+	account := common.HexToAddress("0x76f8804F869b49D11f0F7EcbA37FfA113281D3AD")
+	liquidation := Liquidation{
+		Address: account,
+	}
+	currentHeight, err := sync.c.BlockNumber(context.Background())
+	db.Put(dbm.PendingLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+	bz, err := db.Get(dbm.PendingLiquidationTxStoreKey(account.Bytes()), nil)
+	require.NoError(t, err)
+	gotHeight := big.NewInt(0).SetBytes(bz).Uint64()
+	require.Equal(t, currentHeight, gotHeight)
+
+	err = sync.processLiquidationReq(&liquidation)
+	require.Error(t, err)
+	t.Logf("%v", err)
+}
+
+func TestProcessLiquidationWithPendingLiquidationTxForbiddenPeriodExpire(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	rpcURL := "http://42.3.146.198:21993"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
+
+	account := common.HexToAddress("0x76f8804F869b49D11f0F7EcbA37FfA113281D3AD")
+	liquidation := Liquidation{
+		Address: account,
+	}
+	currentHeight, err := sync.c.BlockNumber(context.Background())
+	currentHeight -= (ForbiddenPeriodForPendingLiquidation + 1)
+	db.Put(dbm.PendingLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
+	bz, err := db.Get(dbm.PendingLiquidationTxStoreKey(account.Bytes()), nil)
+	require.NoError(t, err)
+	gotHeight := big.NewInt(0).SetBytes(bz).Uint64()
+	require.Equal(t, currentHeight, gotHeight)
+
+	err = sync.processLiquidationReq(&liquidation)
+	require.NoError(t, err)
+
+	exist, err := db.Has(dbm.PendingLiquidationTxStoreKey(account.Bytes()), nil)
 	require.False(t, exist)
 }
 
