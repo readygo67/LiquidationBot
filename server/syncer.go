@@ -1376,7 +1376,7 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 			withFeedPrice = true
 			price = tokens[symbol].FeedPrice
 		}
-		
+
 		//apply feeded prices if exist
 		for _, feededPrice := range feededPrices.Prices {
 			if symbols[feededPrice.Address] == symbol {
@@ -2111,8 +2111,6 @@ func (s *Syncer) doLiquidation(scenarioNo *big.Int, flashLoanFrom common.Address
 	auth.GasPrice = gasPrice
 	auth.GasLimit = gasLimit
 
-	logger.Printf("send dummy liquidation\n")
-	return nil, nil
 	tx, err := s.liquidator.Qingsuan(auth, scenarioNo, flashLoanFrom, path1, path2, tokens, flashLoanAmount)
 	if err != nil {
 		return nil, err
