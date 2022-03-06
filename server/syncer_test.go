@@ -137,7 +137,7 @@ func TestDoSyncMarketsAndPrices(t *testing.T) {
 	verifyTokens(t, sync)
 }
 
-func TestSyncMarketsAndPrices(t *testing.T) {
+func TestSyncMarketsAndPricesLoop(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
 	c, err := ethclient.Dial(rpcURL)
@@ -154,7 +154,7 @@ func TestSyncMarketsAndPrices(t *testing.T) {
 	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
 	t.Logf("begin sync markets and prices\n")
 	sync.wg.Add(1)
-	go sync.syncMarketsAndPrices()
+	go sync.SyncMarketsAndPricesLoop()
 
 	time.Sleep(time.Second * 60)
 	close(sync.quitCh)
@@ -1063,7 +1063,7 @@ func TestSyncOneAccount3(t *testing.T) {
 	require.Equal(t, account, common.BytesToAddress(bz))
 }
 
-func TestSyncOneAccounts(t *testing.T) {
+func TestSyncAccounts(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	require.NoError(t, err)
 	rpcURL := "ws://42.3.146.198:21994"
@@ -1463,7 +1463,7 @@ func TestSyncOneAccountWithFeededPrices1(t *testing.T) {
 
 	priorityliquidation := <-sync.priortyLiquidationCh
 
-	sync.calculateSeizedTokenAmount(priorityliquidation)
+	sync.processLiquidationReq(priorityliquidation)
 }
 
 func TestDoFeedPricesPrice(t *testing.T) {
@@ -1835,7 +1835,7 @@ func TestCalculateSeizedTokenCase1(t *testing.T) {
 	liquidation := Liquidation{
 		Address: common.HexToAddress("0x76f8804F869b49D11f0F7EcbA37FfA113281D3AD"),
 	}
-	sync.calculateSeizedTokenAmount(&liquidation)
+	sync.processLiquidationReq(&liquidation)
 }
 
 /*
@@ -1845,7 +1845,7 @@ asset:{Symbol:vBNB CollateralFactor:0.8 Balance:0 Collateral:0 Loan:621836266690
 asset:{Symbol:vUSDT CollateralFactor:0.8 Balance:215772683.533007929220018 Collateral:172618146.8264063433760144 Loan:29151830540231388898.411428882 Price:1000899999000000000 ExchangeRate:215578662951929855302175917}, address:0xfD5840Cd36d94D7229439859C0112a4185BC0255
 account:0xFAbE4C180b6eDad32eA0Cf56587c54417189e422, totalCollateralValue:90.8523171921051228, mintedVAISValue:0, totalLoanValue:91.7116406753390862, calculatedshortfall:859323483233963353, shorfall:867386178630831781
 height15107212, account:0xFAbE4C180b6eDad32eA0Cf56587c54417189e422, repaySmbol:vETH, flashLoanFrom:0x74E4716E431f45807DCF19f284c7aA99F18a4fbc, repayAddress:0xf508fCD89b8bd15579dc79A6827cB4686A3592c8, repayValue:31279904756635715283.04, repayAmount:9826312720412818 seizedSymbol:vETH, seizedAddress:0xf508fCD89b8bd15579dc79A6827cB4686A3592c8, seizedCTokenAmount:53500774, seizedUnderlyingTokenAmount:10808943893782662.4640633729931431, seizedUnderlyingTokenValue:34407894918200473768.6036539816125674
-calculateSeizedTokenAmount case2: seizedSymbol == repaySymbol and symbol is not stable coin, account:0xFAbE4C180b6eDad32eA0Cf56587c54417189e422, symbol:vETH, seizedAmount:10808943893782662.4640633729931431, returnAmout:9850940070589292, usdtAmount:3039720511227732290, gasFee:1579706250000000000, profit:1.4627500066481167
+processLiquidationReq case2: seizedSymbol == repaySymbol and symbol is not stable coin, account:0xFAbE4C180b6eDad32eA0Cf56587c54417189e422, symbol:vETH, seizedAmount:10808943893782662.4640633729931431, returnAmout:9850940070589292, usdtAmount:3039720511227732290, gasFee:1579706250000000000, profit:1.4627500066481167
 case2, profitable liquidation catched:&{0xFAbE4C180b6eDad32eA0Cf56587c54417189e422 0 0 0001-01-01 00:00:00 +0000 UTC}, profit:1.4627500066481167
 --- PASS: TestCalculateSeizedTokenCase2 (26.94s)
 */
@@ -1867,7 +1867,7 @@ func TestCalculateSeizedTokenCase2(t *testing.T) {
 	liquidation := Liquidation{
 		Address: common.HexToAddress("0xFAbE4C180b6eDad32eA0Cf56587c54417189e422"),
 	}
-	sync.calculateSeizedTokenAmount(&liquidation)
+	sync.processLiquidationReq(&liquidation)
 }
 
 /*
@@ -1884,7 +1884,7 @@ asset:{Symbol:vADA CollateralFactor:0.6 Balance:444157344254167323.3868614742082
 asset:{Symbol:vBCH CollateralFactor:0.6 Balance:24054302387872506388.9704304195411433 Collateral:14432581432723503833.382258251724686 Loan:0 Price:340110000000000000000 ExchangeRate:200447313411916122773524999}, address:0x5F0388EBc2B94FA8E123F404b79cCF5f40b29176
 account:0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7, totalCollateralValue:111.6430136546219316, mintedVAISValue:0, totalLoanValue:120.7407441575075276, calculatedshortfall:9097730502885596041, shorfall:9259891645581666045
 height15122375, account:0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7, repaySmbol:vUSDC, flashLoanFrom:0xd99c7F6C65857AC913a8f880A4cb84032AB2FC5b, repayAddress:0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8, repayValue:27846674511735916820.3199005375, repayAmount:27849464331825357425 seizedSymbol:vBUSD, seizedAddress:0x95c78222B3D6e262426483D42CfA53685A67Ab9D, seizedCTokenAmount:143328183762, seizedUnderlyingTokenAmount:30634412908670530806.0868041235415056, seizedUnderlyingTokenValue:30628279133345892249.0561553931858695
-calculateSeizedTokenAmount case3: seizedSymbol != repaySymbol and seizedSymbol stable coin, account:0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7, seizedsymbol:vBUSD, seizedAmount:30634412908670530806.0868041235415056, repaySymbol:vUSDC, returnAmout:27995623301741701152, remain:2638789606928829654.0868041235415056, gasFee:1050537750000000000, profit:1.5877235052797823
+processLiquidationReq case3: seizedSymbol != repaySymbol and seizedSymbol stable coin, account:0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7, seizedsymbol:vBUSD, seizedAmount:30634412908670530806.0868041235415056, repaySymbol:vUSDC, returnAmout:27995623301741701152, remain:2638789606928829654.0868041235415056, gasFee:1050537750000000000, profit:1.5877235052797823
 case3, profitable liquidation catched:&{0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7 0 0 0001-01-01 00:00:00 +0000 UTC}, profit:1.5877235052797823
 --- PASS: TestCalculateSeizedTokenCase3 (29.38s)
 PASS
@@ -1907,7 +1907,7 @@ func TestCalculateSeizedTokenCase3(t *testing.T) {
 	liquidation := Liquidation{
 		Address: common.HexToAddress("0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7"),
 	}
-	sync.calculateSeizedTokenAmount(&liquidation)
+	sync.processLiquidationReq(&liquidation)
 }
 
 func TestCalculateSeizedTokenCase3_2(t *testing.T) {
@@ -1928,7 +1928,7 @@ func TestCalculateSeizedTokenCase3_2(t *testing.T) {
 	liquidation := Liquidation{
 		Address: common.HexToAddress("0xF2455A4c6fcC6F41f59222F4244AFdDC85ff1Ed7"),
 	}
-	sync.calculateSeizedTokenAmount(&liquidation)
+	sync.processLiquidationReq(&liquidation)
 }
 
 /*
@@ -1941,7 +1941,7 @@ asset:{Symbol:vADA CollateralFactor:0.6 Balance:84708847545395144834.27912284756
 asset:{Symbol:vLINK CollateralFactor:0.6 Balance:4176794343524.6477704702561568 Collateral:2506076606114.7886622821536941 Loan:0 Price:18158099999000000000 ExchangeRate:201952374797864054128387727}, address:0x650b940a1033B8A1b1873f78730FcFC73ec11f1f
 account:0x1002C4dB05060e4c1Bac47CeAE3c090984BdE8fC, totalCollateralValue:52.4911513303392838, mintedVAISValue:0, totalLoanValue:58.5377583990790958, calculatedshortfall:6046607068739812013, shorfall:5843806802763732111
 height15122428, account:0x1002C4dB05060e4c1Bac47CeAE3c090984BdE8fC, repaySmbol:vBUSD, flashLoanFrom:0x58F876857a02D6762E0101bb5C46A8c1ED44Dc16, repayAddress:0x95c78222B3D6e262426483D42CfA53685A67Ab9D, repayValue:29268879199539547913.039595225, repayAmount:29274740734503113799 seizedSymbol:vADA, seizedAddress:0x9A0AF7FDb2065Ce470D72664DE73cAE409dA28Ec, seizedCTokenAmount:135453921038, seizedUnderlyingTokenAmount:27217834072424510573.9312277038852831, seizedUnderlyingTokenValue:32068419544890536089.098520552291643
-calculateSeizedTokenAmount case4: seizedSymbol is not stable coin, repaySymbol is stable coin, account:0x1002C4dB05060e4c1Bac47CeAE3c090984BdE8fC repaysymbol:vBUSD, seizedsymbol:vADA seizedAmount:27217834072424510573.9312277038852831, amountsOut:32259971881587210572 returnAmout:29348111012033196762, remain:2911860869554013810, gasFee:1046200750000000000, profit:1.8650770922114074
+processLiquidationReq case4: seizedSymbol is not stable coin, repaySymbol is stable coin, account:0x1002C4dB05060e4c1Bac47CeAE3c090984BdE8fC repaysymbol:vBUSD, seizedsymbol:vADA seizedAmount:27217834072424510573.9312277038852831, amountsOut:32259971881587210572 returnAmout:29348111012033196762, remain:2911860869554013810, gasFee:1046200750000000000, profit:1.8650770922114074
 case4, profitable liquidation catched:&{0x1002C4dB05060e4c1Bac47CeAE3c090984BdE8fC 0 0 0001-01-01 00:00:00 +0000 UTC}, profit:1.8650770922114074
 --- PASS: TestCalculateSeizedTokenCase4 (22.54s)
 PASS
@@ -1964,7 +1964,7 @@ func TestCalculateSeizedTokenCase4(t *testing.T) {
 	liquidation := Liquidation{
 		Address: common.HexToAddress("0x1002C4dB05060e4c1Bac47CeAE3c090984BdE8fC"),
 	}
-	sync.calculateSeizedTokenAmount(&liquidation)
+	sync.processLiquidationReq(&liquidation)
 }
 
 /*
@@ -1975,8 +1975,8 @@ asset:{Symbol:vBUSD CollateralFactor:0.8 Balance:1547045016680082980.81109267018
 asset:{Symbol:vSXP CollateralFactor:0.5 Balance:0 Collateral:0 Loan:45577189650593259511.8119155 Price:1510230500000000000 ExchangeRate:201490134864971918561479771}, address:0x2fF3d0F6990a40261c66E1ff2017aCBc282EB6d0
 account:0x0A88bbE6be0005E46F56aA4145c8FB863f9Df627, totalCollateralValue:80.7896456075564662, mintedVAISValue:0, totalLoanValue:83.5679320818018607, calculatedshortfall:2778286474245394432, shorfall:2785790723569483283
 height15122871, account:0x0A88bbE6be0005E46F56aA4145c8FB863f9Df627, repaySmbol:vSXP, flashLoanFrom:0xD8E2F8b6Db204c405543953Ef6359912FE3A88d6, repayAddress:0x2fF3d0F6990a40261c66E1ff2017aCBc282EB6d0, repayValue:22788594825296629755.90595775, repayAmount:15089481258189812585 seizedSymbol:vBNB, seizedAddress:0xA07c5b74C9B40447a954e1466938b865b6BBea36, seizedCTokenAmount:279502853, seizedUnderlyingTokenAmount:60170624240911168.1970088281443151, seizedUnderlyingTokenValue:25060162436975887886.5312217896850744
-calculateSeizedTokenAmount case5, account:0x0A88bbE6be0005E46F56aA4145c8FB863f9Df627, paths:[0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c 0x47BEAd2563dCBf3bF2c9407fEa4dC236fAbA485A], swap 54996881790345807BNB for 37818248767392999SXP
-calculateSeizedTokenAmount case5, account:0x0A88bbE6be0005E46F56aA4145c8FB863f9Df627, path:[0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c 0x55d398326f99059fF775485246999027B3197955], swap 5173742450565361BNB for 2146011084429686556USDT, profit:0.6900303911512192
+processLiquidationReq case5, account:0x0A88bbE6be0005E46F56aA4145c8FB863f9Df627, paths:[0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c 0x47BEAd2563dCBf3bF2c9407fEa4dC236fAbA485A], swap 54996881790345807BNB for 37818248767392999SXP
+processLiquidationReq case5, account:0x0A88bbE6be0005E46F56aA4145c8FB863f9Df627, path:[0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c 0x55d398326f99059fF775485246999027B3197955], swap 5173742450565361BNB for 2146011084429686556USDT, profit:0.6900303911512192
 case5: profitable liquidation catched:&{0x0A88bbE6be0005E46F56aA4145c8FB863f9Df627 0 0 0001-01-01 00:00:00 +0000 UTC}, profit:0.6900303911512192
 --- PASS: TestCalculateSeizedTokenCase5 (21.05s)
 PASS
@@ -1999,7 +1999,7 @@ func TestCalculateSeizedTokenCase5(t *testing.T) {
 	liquidation := Liquidation{
 		Address: common.HexToAddress("0x0A88bbE6be0005E46F56aA4145c8FB863f9Df627"),
 	}
-	sync.calculateSeizedTokenAmount(&liquidation)
+	sync.processLiquidationReq(&liquidation)
 }
 
 func TestCalculateSeizedTokenCase7(t *testing.T) {
@@ -2020,7 +2020,7 @@ func TestCalculateSeizedTokenCase7(t *testing.T) {
 	liquidation := Liquidation{
 		Address: common.HexToAddress("0x614146018042D47Dcde01A9400A8d14343047b67"),
 	}
-	sync.calculateSeizedTokenAmount(&liquidation)
+	sync.processLiquidationReq(&liquidation)
 }
 
 func TestCalculateSeizedToken1(t *testing.T) {
@@ -2042,7 +2042,7 @@ func TestCalculateSeizedToken1(t *testing.T) {
 		Address: common.HexToAddress("0x05bbf0C12882FDEcd53FD734731ad578aF79621C"),
 	}
 
-	err = sync.calculateSeizedTokenAmount(&liquidation)
+	err = sync.processLiquidationReq(&liquidation)
 	if err != nil {
 		t.Logf(err.Error())
 	}
@@ -2075,7 +2075,7 @@ func TestCalculateSeizedTokenWithBadLiquidationTxInForbiddenPeriod(t *testing.T)
 	gotHeight := big.NewInt(0).SetBytes(bz).Uint64()
 	require.Equal(t, currentHeight, gotHeight)
 
-	err = sync.calculateSeizedTokenAmount(&liquidation)
+	err = sync.processLiquidationReq(&liquidation)
 	require.Error(t, err)
 	t.Logf("%v", err)
 }
@@ -2108,7 +2108,7 @@ func TestCalculateSeizedTokenWithBadLiquidationTxForbiddenPeriodExpire(t *testin
 	gotHeight := big.NewInt(0).SetBytes(bz).Uint64()
 	require.Equal(t, currentHeight, gotHeight)
 
-	err = sync.calculateSeizedTokenAmount(&liquidation)
+	err = sync.processLiquidationReq(&liquidation)
 	require.NoError(t, err)
 
 	exist, err := db.Has(dbm.BadLiquidationTx(account.Bytes()), nil)
@@ -2134,7 +2134,7 @@ func TestCalculateSeizedTokenGetAmountsOutWithMulOverFlow(t *testing.T) {
 		Address: common.HexToAddress("1e73902ab4144299dfc2ac5a3765122c02ce889f"),
 	}
 
-	err = sync.calculateSeizedTokenAmount(&liquidation)
+	err = sync.processLiquidationReq(&liquidation)
 	if err != nil {
 		t.Logf(err.Error())
 	}
@@ -2159,7 +2159,7 @@ func TestCalculateSeizedTokenGetAmountsInExecutionRevert(t *testing.T) {
 		Address: common.HexToAddress("ba3b9a3ecf19e1139c78c4718d45fb99f7a838cd"),
 	}
 
-	err = sync.calculateSeizedTokenAmount(&liquidation)
+	err = sync.processLiquidationReq(&liquidation)
 	if err != nil {
 		t.Logf(err.Error())
 	}
@@ -2203,7 +2203,7 @@ func TestCalculateSeizedTokens(t *testing.T) {
 		liquidation := Liquidation{
 			Address: common.HexToAddress(account),
 		}
-		err := sync.calculateSeizedTokenAmount(&liquidation)
+		err := sync.processLiquidationReq(&liquidation)
 		if err != nil {
 			t.Logf(err.Error())
 		}
@@ -2465,9 +2465,9 @@ func TestMonitorPricesInTxPool(t *testing.T) {
 	feededPricesCh := make(chan *FeededPrices, 64)
 
 	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
-	t.Logf("before monitorTxPool\n")
+	t.Logf("before MonitorTxPoolLoop\n")
 	sync.wg.Add(2)
-	go sync.monitorTxPool()
+	go sync.MonitorTxPoolLoop()
 	go func() {
 		defer sync.wg.Done()
 		for {
@@ -2542,7 +2542,7 @@ func verifyTokens(t *testing.T, sync *Syncer) {
 func getLiquidationKey(maxLoanValue, healthFactor decimal.Decimal, accountBytes []byte) []byte {
 	var key []byte
 	if maxLoanValue.Cmp(MaxLoanValueThreshold) == -1 {
-		key = dbm.LiquidationNonProfitStoreKey(accountBytes)
+		key = dbm.LiquidationNoAssetStoreKey(accountBytes)
 	} else {
 		if healthFactor.Cmp(Decimal1P0) == -1 {
 			key = dbm.LiquidationBelow1P0StoreKey(accountBytes)
@@ -2574,7 +2574,7 @@ func TestGetOracle(t *testing.T) {
 
 }
 
-func TestMonitorTxPool(t *testing.T) {
+func TestMonitorTxPoolLoop(t *testing.T) {
 	rpcURL := "ws://192.168.88.144:28546"
 	client, _ := ethclient.Dial(rpcURL)
 	fmt.Println("We have a connection")

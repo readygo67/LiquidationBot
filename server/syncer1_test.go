@@ -78,14 +78,14 @@ func TestSyncOneAccountWithFeededPrices2(t *testing.T) {
 	//require.NoError(t, err)
 
 	sync.wg.Add(5)
-	go sync.syncMarketsAndPrices()
+	go sync.SyncMarketsAndPricesLoop()
 	go sync.syncLiquidationBelow1P1()
-	go sync.monitorTxPool()
+	go sync.MonitorTxPoolLoop()
 	go sync.feedPrices()
-	go sync.printConcernedAccountInfo()
+	go sync.PrintConcernedAccountInfoLoop()
 
 	waitExit()
-	
+
 	close(sync.quitCh)
 	sync.wg.Wait()
 

@@ -81,7 +81,7 @@ import (
 //				db.Delete(dbm.LiquidationAbove2P0StoreKey(accountBytes), nil)
 //			}
 //
-//			//db.Put(dbm.LiquidationNonProfitStoreKey(accountBytes), accountBytes, nil)
+//			//db.Put(dbm.LiquidationNoAssetStoreKey(accountBytes), accountBytes, nil)
 //		}
 //	}
 //
@@ -111,7 +111,7 @@ func TestDeleteAllKeysExceptBorrowers(t *testing.T) {
 			LiquidationBelow1P5Prefix  = []byte("liquidation_below_1p5")
 			LiquidationBelow2P0Prefix  = []byte("liquidation_below_2p0")
 			LiquidationAbove2P0Prefix  = []byte("liquidation_above_2p0")
-			LiquidationNonProfitPrefix = []byte("liquidation_non_profit") //
+			LiquidationNoAssetPrefix = []byte("liquidation_no_asset") //
 	*/
 	var addresses []common.Address
 	iter := db.NewIterator(util.BytesPrefix(dbm.BorrowersPrefix), nil)
@@ -191,11 +191,11 @@ func TestDeleteAllKeysExceptBorrowers(t *testing.T) {
 	iter6.Release()
 
 	countNonProfit := 0
-	iter7 := db.NewIterator(util.BytesPrefix(dbm.LiquidationNonProfitPrefix), nil)
+	iter7 := db.NewIterator(util.BytesPrefix(dbm.LiquidationNoAssetPrefix), nil)
 	for iter7.Next() {
 		countNonProfit++
 		accountBytes := iter7.Value()
-		db.Delete(dbm.LiquidationNonProfitStoreKey(accountBytes), nil)
+		db.Delete(dbm.LiquidationNoAssetStoreKey(accountBytes), nil)
 	}
 	fmt.Printf("delete %v nonprofit account\n", countNonProfit)
 	iter7.Release()
@@ -237,10 +237,10 @@ func TestDeleteAllNonProfitAccounts(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	var iter = db.NewIterator(util.BytesPrefix(dbm.LiquidationNonProfitPrefix), nil)
+	var iter = db.NewIterator(util.BytesPrefix(dbm.LiquidationNoAssetPrefix), nil)
 	defer iter.Release()
 
 	for iter.Next() {
-		db.Delete(dbm.LiquidationNonProfitStoreKey(iter.Value()), nil)
+		db.Delete(dbm.LiquidationNoAssetStoreKey(iter.Value()), nil)
 	}
 }

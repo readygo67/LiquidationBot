@@ -36,7 +36,8 @@ const (
 	SyncIntervalBelow1P5             = 360
 	SyncIntervalBelow2P0             = 720
 	SyncIntervalAbove2P0             = 1800
-	SyncIntervalNoProfit             = 60
+	SyncIntervalBackGround           = 60
+	SyncIntervalForMarkets           = 6
 	MonitorLiquidationInterval       = 120
 	ForbiddenPeriodForBadLiquidation = 200 //200 block
 )
@@ -162,12 +163,11 @@ type Syncer struct {
 	m                         sync.Mutex
 	wg                        sync.WaitGroup
 	quitCh                    chan struct{}
-	forceUpdatePricesCh       chan struct{}
 	feededPricesCh            chan *FeededPrices
 	liquidationCh             chan *Liquidation
 	priortyLiquidationCh      chan *Liquidation
 	concernedAccountInfoCh    chan *ConcernedAccountInfo
-	regularAccountSyncCh      chan common.Address
+	backgroundAccountSyncCh   chan common.Address
 	lowPriorityAccountSyncCh  chan *AccountsWithFeedPrices
 	highPriorityAccountSyncCh chan *AccountsWithFeedPrices
 }
@@ -379,12 +379,11 @@ func NewSyncer(
 		PrivateKey:                privateKey,
 		m:                         m,
 		quitCh:                    make(chan struct{}),
-		forceUpdatePricesCh:       make(chan struct{}),
 		feededPricesCh:            feededPricesCh,
 		liquidationCh:             liquidationCh,
 		priortyLiquidationCh:      priorityLiquationCh,
 		concernedAccountInfoCh:    make(chan *ConcernedAccountInfo, 4096),
-		regularAccountSyncCh:      make(chan common.Address, 8192),
+		backgroundAccountSyncCh:   make(chan common.Address, 8192),
 		lowPriorityAccountSyncCh:  make(chan *AccountsWithFeedPrices, 8192),
 		highPriorityAccountSyncCh: make(chan *AccountsWithFeedPrices, 248),
 	}
@@ -394,20 +393,16 @@ func (s *Syncer) Start() {
 	log.Info("server start")
 	fmt.Println("server start")
 
-	s.wg.Add(8)
-	go s.syncMarketsAndPrices()
-	go s.feedPrices()
-	go s.syncAllBorrowers()
-	//go s.syncLiquidationBelow1P0()
-	//go s.syncLiquidationBelow1P1()
-	//go s.syncLiquidationBelow1P5()
-	//go s.syncLiquidationBelow2P0()
-	//go s.syncLiquidationAbove2P0()
-	go s.syncLiquidationNonProfit()
-	go s.monitorLiquidationEvent()
-	go s.printConcernedAccountInfo()
-	go s.monitorTxPool()
-	go s.liqudate()
+	s.wg.Add(9)
+	go s.SyncMarketsAndPricesLoop()
+	go s.ProcessFeededPricesLoop()
+	go s.SearchNewBorrowerLoop()
+	go s.BackgroundSyncLoop()
+	go s.syncAccountLoop()
+	go s.MonitorLiquidationEventLoop()
+	go s.PrintConcernedAccountInfoLoop()
+	go s.MonitorTxPoolLoop()
+	go s.ProcessLiquidationLoop()
 }
 
 func (s *Syncer) Stop() {
@@ -415,7 +410,7 @@ func (s *Syncer) Stop() {
 	s.wg.Wait()
 }
 
-func (s *Syncer) syncMarketsAndPrices() {
+func (s *Syncer) SyncMarketsAndPricesLoop() {
 	defer s.wg.Done()
 	t := time.NewTimer(0)
 	defer t.Stop()
@@ -429,9 +424,7 @@ func (s *Syncer) syncMarketsAndPrices() {
 			//fmt.Printf("%v th sync markers and prices @ %v\n", count, time.Now())
 			count++
 			s.doSyncMarketsAndPrices()
-			t.Reset(time.Second * 3)
-		case <-s.forceUpdatePricesCh:
-			s.doSyncMarketsAndPrices()
+			t.Reset(time.Second * SyncIntervalForMarkets)
 		}
 	}
 }
@@ -499,24 +492,21 @@ func (s *Syncer) doSyncMarketsAndPrices() {
 		}()
 	}
 	wg.Wait()
-	//height, _ := s.c.BlockNumber(context.Background())
-	//fmt.Printf("doSyncMarketsAndPrices, height:%v, vBNB:%v, vETH:%v, vBTC:%v, vBUSD:%v, vDOGE:%v, vXVS:%v\n", height, s.tokens["vBNB"].Price, s.tokens["vETH"].Price, s.tokens["vBTC"].Price, s.tokens["vBUSD"].Price, s.tokens["vDOGE"].Price, s.tokens["vXVS"].Price)
-
 }
 
-func (s *Syncer) feedPrices() {
+func (s *Syncer) ProcessFeededPricesLoop() {
 	defer s.wg.Done()
 	for {
 		select {
 		case <-s.quitCh:
 			return
 		case feededPrices := <-s.feededPricesCh:
-			s.doFeededPrices(feededPrices)
+			s.processFeededPrices(feededPrices)
 		}
 	}
 }
 
-func (s *Syncer) doFeededPrices(feededPrices *FeededPrices) {
+func (s *Syncer) processFeededPrices(feededPrices *FeededPrices) {
 	db := s.db
 	var accounts []common.Address
 
@@ -530,13 +520,26 @@ func (s *Syncer) doFeededPrices(feededPrices *FeededPrices) {
 		price := tokens[symbol].Price
 		priceDeltaRatio := price.Sub(feededPrice.Price).Abs().Div(price)
 		if priceDeltaRatio.Cmp(decimal.New(5, -2)) == 1 {
-			fmt.Printf("doFeededPrices, sybmol:%v feedPrices vibration %v exceeds 5 percent, height%v\n", symbol, priceDeltaRatio, feededPrices.Height)
+			fmt.Printf("processFeededPrices, sybmol:%v feedPrices vibration %v exceeds 5 percent, height%v\n", symbol, priceDeltaRatio, feededPrices.Height)
 			return
+		}
+
+		symbol2 := ""
+		if symbol == "vBETH" {
+			symbol2 = "vETH"
+		}
+		if symbol == "vETH" {
+			symbol2 = "vBETH"
 		}
 
 		s.m.Lock()
 		s.tokens[symbol].FeedPrice = feededPrice.Price
 		s.tokens[symbol].FeedPriceUpdateHeihgt = feededPrices.Height
+
+		if symbol2 != "" {
+			s.tokens[symbol2].FeedPrice = feededPrice.Price
+			s.tokens[symbol2].FeedPriceUpdateHeihgt = feededPrices.Height
+		}
 		s.m.Unlock()
 	}
 
@@ -567,14 +570,20 @@ func (s *Syncer) doFeededPrices(feededPrices *FeededPrices) {
 			}
 		}
 		iter.Release()
-		//fmt.Printf("doFeededPrices, symbol:%v, feededPrice:%v, accounts:%v\n", symbol, feededPrice, accounts)
+		//fmt.Printf("processFeededPrices, symbol:%v, feededPrice:%v, accounts:%v\n", symbol, feededPrice, accounts)
 	}
 
 	priorityAccountMap := make(map[common.Address]bool)
 	iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P1Prefix), nil)
 	for iter.Next() {
-		accountBytes := iter.Value()
-		priorityAccountMap[common.BytesToAddress(accountBytes)] = true
+		account := common.BytesToAddress(iter.Value())
+		priorityAccountMap[account] = true
+	}
+
+	iter = db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P0Prefix), nil)
+	for iter.Next() {
+		account := common.BytesToAddress(iter.Value())
+		priorityAccountMap[account] = true
 	}
 	iter.Release()
 
@@ -589,6 +598,7 @@ func (s *Syncer) doFeededPrices(feededPrices *FeededPrices) {
 		}
 	}
 
+	//send highPriorityAccount as a batch
 	if len(highPriorityAccounts) != 0 {
 		s.highPriorityAccountSyncCh <- &AccountsWithFeedPrices{
 			Addresses:    highPriorityAccounts,
@@ -596,34 +606,14 @@ func (s *Syncer) doFeededPrices(feededPrices *FeededPrices) {
 		}
 	}
 
-	if len(lowPriorityAccounts) != 0 {
-		for _, account := range lowPriorityAccounts {
-			s.lowPriorityAccountSyncCh <- &AccountsWithFeedPrices{
-				Addresses:    []common.Address{account},
-				FeededPrices: feededPrices,
-			}
+	//send lowPriorityAccount one by one
+	for _, account := range lowPriorityAccounts {
+		s.lowPriorityAccountSyncCh <- &AccountsWithFeedPrices{
+			Addresses:    []common.Address{account},
+			FeededPrices: feededPrices,
 		}
 	}
 }
-
-/*
-func (s *Syncer) syncAccounts(accounts []common.Address) {
-	var wg sync.WaitGroup
-	wg.Add(len(accounts))
-	sem := make(semaphore, runtime.NumCPU())
-
-	for _, account_ := range accounts {
-		account := account_
-		sem.Acquire()
-		go func() {
-			defer sem.Release()
-			defer wg.Done()
-			s.syncOneAccount(account)
-		}()
-	}
-	wg.Wait()
-}
-*/
 
 func (s *Syncer) syncAccountLoop() {
 	defer s.wg.Done()
@@ -632,41 +622,60 @@ func (s *Syncer) syncAccountLoop() {
 		select {
 		case <-s.quitCh:
 			return
-		case data := <-s.highPriorityAccountSyncCh:
-			accounts := data.Addresses
-			feededPrices := data.FeededPrices
-			var wg sync.WaitGroup
-			wg.Add(len(accounts))
-			sem := make(semaphore, runtime.NumCPU())
-			for _, account_ := range accounts {
-				account := account_
-				sem.Acquire()
-				go func() {
-					defer sem.Release()
-					defer wg.Done()
-					s.syncOneAccountWithFeededPrices(account, feededPrices)
-				}()
-			}
-			wg.Wait()
 
-		case data := <-s.lowPriorityAccountSyncCh:
-			accounts := data.Addresses
-			feededPrices := data.FeededPrices
-			if len(s.highPriorityAccountSyncCh) != 0 {
-				break
+		case req := <-s.highPriorityAccountSyncCh:
+			s.processHighPriorityAccountSync(req)
+
+		case req := <-s.lowPriorityAccountSyncCh:
+		PRIORITY1:
+			for {
+				select {
+				case innerReq := <-s.highPriorityAccountSyncCh:
+					s.processHighPriorityAccountSync(innerReq)
+				default:
+					break PRIORITY1
+				}
 			}
+
+			accounts := req.Addresses
+			feededPrices := req.FeededPrices
 			s.syncOneAccountWithFeededPrices(accounts[0], feededPrices)
 
-		case account := <-s.regularAccountSyncCh:
-			if len(s.highPriorityAccountSyncCh) != 0 {
-				break
+		case account := <-s.backgroundAccountSyncCh:
+		PRIORITY2:
+			for {
+				select {
+				case innerReq := <-s.highPriorityAccountSyncCh:
+					s.processHighPriorityAccountSync(innerReq)
+				default:
+					break PRIORITY2
+				}
 			}
 			s.syncOneAccount(account)
 		}
 	}
 }
 
-func (s *Syncer) syncAllBorrowers() {
+func (s *Syncer) processHighPriorityAccountSync(req *AccountsWithFeedPrices) {
+	accounts := req.Addresses
+	feededPrices := req.FeededPrices
+
+	var wg sync.WaitGroup
+	wg.Add(len(accounts))
+	sem := make(semaphore, runtime.NumCPU())
+	for _, account_ := range accounts {
+		account := account_
+		sem.Acquire()
+		go func() {
+			defer sem.Release()
+			defer wg.Done()
+			s.syncOneAccountWithFeededPrices(account, feededPrices)
+		}()
+	}
+	wg.Wait()
+}
+
+func (s *Syncer) SearchNewBorrowerLoop() {
 	defer s.wg.Done()
 	db := s.db
 	c := s.c
@@ -728,7 +737,7 @@ func (s *Syncer) syncAllBorrowers() {
 
 			logs, err = c.FilterLogs(context.Background(), query)
 			if err != nil {
-				fmt.Printf("syncAllBorrowers, fail to filter logs, err:%v\n", err)
+				fmt.Printf("SearchNewBorrowerLoop, fail to filter logs, err:%v\n", err)
 				goto EndWithoutUpdateHeight
 			}
 
@@ -755,7 +764,7 @@ func (s *Syncer) syncAllBorrowers() {
 	}
 }
 
-func (s *Syncer) syncLiquidationBelow1P0() {
+func (s *Syncer) BackgroundSyncLoop() {
 	defer s.wg.Done()
 	db := s.db
 
@@ -768,156 +777,26 @@ func (s *Syncer) syncLiquidationBelow1P0() {
 		case <-s.quitCh:
 			return
 		case <-t.C:
-			fmt.Printf("%vth sync below 1.0 start @ %v\n", count, time.Now())
+			fmt.Printf("%vth background sync t @ %v\n", count, time.Now())
 			count++
 
-			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P0Prefix), nil)
+			var accounts []common.Address
+			iter := db.NewIterator(util.BytesPrefix(dbm.BorrowersPrefix), nil)
 			for iter.Next() {
-				s.regularAccountSyncCh <- common.BytesToAddress(iter.Value())
+				accounts = append(accounts, common.BytesToAddress(iter.Value()))
 			}
 			iter.Release()
 
-			t.Reset(time.Second * SyncIntervalBelow1P0)
+			for _, account := range accounts {
+				s.backgroundAccountSyncCh <- account
+			}
+
+			t.Reset(time.Second * SyncIntervalBackGround)
 		}
 	}
 }
 
-func (s *Syncer) syncLiquidationBelow1P1() {
-	defer s.wg.Done()
-	db := s.db
-
-	t := time.NewTimer(0)
-	defer t.Stop()
-
-	count := 1
-	for {
-		select {
-		case <-s.quitCh:
-			return
-		case <-t.C:
-			//fmt.Printf("%vth sync below 1.1 start @ %v\n", count, time.Now())
-			count++
-
-			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P1Prefix), nil)
-			for iter.Next() {
-				s.regularAccountSyncCh <- common.BytesToAddress(iter.Value())
-			}
-			iter.Release()
-
-			t.Reset(time.Second * SyncIntervalBelow1P1)
-		}
-	}
-}
-
-func (s *Syncer) syncLiquidationBelow1P5() {
-	defer s.wg.Done()
-	db := s.db
-
-	t := time.NewTimer(0)
-	defer t.Stop()
-
-	count := 1
-	for {
-		select {
-		case <-s.quitCh:
-			return
-		case <-t.C:
-			fmt.Printf("%vth sync below 1.5 start @ %v\n", count, time.Now())
-			count++
-
-			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P5Prefix), nil)
-			for iter.Next() {
-				s.regularAccountSyncCh <- common.BytesToAddress(iter.Value())
-			}
-			iter.Release()
-
-			t.Reset(time.Second * SyncIntervalBelow1P5)
-		}
-	}
-}
-
-func (s *Syncer) syncLiquidationBelow2P0() {
-	defer s.wg.Done()
-	db := s.db
-
-	t := time.NewTimer(0)
-	defer t.Stop()
-
-	count := 1
-	for {
-		select {
-		case <-s.quitCh:
-			return
-		case <-t.C:
-			fmt.Printf("%vth sync below 2.0 start @ %v\n", count, time.Now())
-			count++
-
-			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow2P0Prefix), nil)
-			for iter.Next() {
-				s.regularAccountSyncCh <- common.BytesToAddress(iter.Value())
-			}
-			iter.Release()
-
-			t.Reset(time.Second * SyncIntervalBelow2P0)
-		}
-	}
-}
-
-func (s *Syncer) syncLiquidationAbove2P0() {
-	defer s.wg.Done()
-	db := s.db
-
-	t := time.NewTimer(0)
-	defer t.Stop()
-
-	count := 1
-	for {
-		select {
-		case <-s.quitCh:
-			return
-		case <-t.C:
-			fmt.Printf("%vth sync above 2.0 start @ %v\n", count, time.Now())
-			count++
-
-			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationAbove2P0Prefix), nil)
-			for iter.Next() {
-				s.regularAccountSyncCh <- common.BytesToAddress(iter.Value())
-			}
-			iter.Release()
-
-			t.Reset(time.Second * SyncIntervalAbove2P0)
-		}
-	}
-}
-
-func (s *Syncer) syncLiquidationNonProfit() {
-	defer s.wg.Done()
-	db := s.db
-
-	t := time.NewTimer(0)
-	defer t.Stop()
-
-	count := 1
-	for {
-		select {
-		case <-s.quitCh:
-			return
-		case <-t.C:
-			fmt.Printf("%vth sync non profit account start @ %v\n", count, time.Now())
-			count++
-
-			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationNonProfitPrefix), nil)
-			for iter.Next() {
-				s.regularAccountSyncCh <- common.BytesToAddress(iter.Value())
-			}
-
-			iter.Release()
-			t.Reset(time.Second * SyncIntervalNoProfit)
-		}
-	}
-}
-
-func (s *Syncer) monitorLiquidationEvent() {
+func (s *Syncer) MonitorLiquidationEventLoop() {
 	db := s.db
 	defer s.wg.Done()
 
@@ -985,7 +864,7 @@ func (s *Syncer) monitorLiquidationEvent() {
 	}
 }
 
-func (s *Syncer) monitorTxPool() {
+func (s *Syncer) MonitorTxPoolLoop() {
 	defer s.wg.Done()
 
 	v := reflect.ValueOf(s.c).Elem()
@@ -1010,7 +889,7 @@ func (s *Syncer) monitorTxPool() {
 			OracleToVTokenMap[token.Oracle] = token.Address
 		}
 	}
-	fmt.Printf("monitorTxPool running....\n")
+	fmt.Printf("MonitorTxPoolLoop running....\n")
 	for {
 		select {
 		case <-s.quitCh:
@@ -1064,7 +943,7 @@ func (s *Syncer) monitorTxPool() {
 	}
 }
 
-func (s *Syncer) printConcernedAccountInfo() {
+func (s *Syncer) PrintConcernedAccountInfoLoop() {
 	defer s.wg.Done()
 
 	for {
@@ -1077,6 +956,7 @@ func (s *Syncer) printConcernedAccountInfo() {
 	}
 }
 
+//only for tests
 func (s *Syncer) syncAccounts(accounts []common.Address) {
 	var wg sync.WaitGroup
 	wg.Add(len(accounts))
@@ -1209,15 +1089,6 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 		}
 		s.liquidationCh <- liquidation
 	}
-	//if healthFactor.Cmp(Decimal1P0) != 1 {
-	//	blockNumber, _ := s.c.BlockNumber(ctx)
-	//	liquidation := &Liquidation{
-	//		Address:      account,
-	//		HealthFactor: healthFactor,
-	//		BlockNumber:  blockNumber,
-	//	}
-	//	s.liquidationCh <- liquidation
-	//}
 	return nil
 }
 
@@ -1274,13 +1145,13 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 		}
 
 		//apply feeded prices if exist
-		for _, feededPrice := range feededPrices.Prices {
-			if symbols[feededPrice.Address] == symbol {
-				price = feededPrice.Price
-			} else if strings.Contains(symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
-				price = feededPrice.Price
-			}
-		}
+		//for _, feededPrice := range feededPrices.Prices {
+		//	if symbols[feededPrice.Address] == symbol {
+		//		price = feededPrice.Price
+		//	} else if strings.Contains(symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
+		//		price = feededPrice.Price
+		//	}
+		//}
 
 		exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
 		balance := decimal.NewFromBigInt(bigBalance, 0)
@@ -1396,7 +1267,7 @@ func (s *Syncer) syncOneAccountWithIncreaseAccountNumber(account common.Address)
 	return nil
 }
 
-func (s *Syncer) liqudate() {
+func (s *Syncer) ProcessLiquidationLoop() {
 	defer s.wg.Done()
 
 	for {
@@ -1406,22 +1277,16 @@ func (s *Syncer) liqudate() {
 
 		case pending := <-s.priortyLiquidationCh:
 			fmt.Printf("receive priority liquidation:%v\n", pending)
-			s.calculateSeizedTokenAmount(pending)
-			//
-			//pending.Endtime = time.Now().Add(time.Second * PriorityLiquidationTime)
-			//priorityPendings = append(priorityPendings, pending)
+			s.processLiquidationReq(pending)
 
 		case pending := <-s.liquidationCh:
 			fmt.Printf("recive liquidation:%v\n", pending)
-			s.calculateSeizedTokenAmount(pending)
-			//
-			//pending.Endtime = time.Now().Add(time.Second * NormalLiquidationTime)
-			//pendings = append(pendings, pending)
+			s.processLiquidationReq(pending)
 		}
 	}
 }
 
-func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
+func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 	comptroller := s.comptroller
 	pancakeRouter := s.pancakeRouter
 	pancakeFactory := s.pancakeFactory
@@ -1443,7 +1308,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	//current height
 	currentHeight, err := s.c.BlockNumber(context.Background())
 	if err != nil {
-		fmt.Printf("calculateSeizedTokenAmount, fail to get blocknumber,err:%v\n", err)
+		fmt.Printf("processLiquidationReq, fail to get blocknumber,err:%v\n", err)
 		return err
 	}
 	callOptions := &bind.CallOpts{
@@ -1451,13 +1316,13 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	}
 	had, err := db.Has(dbm.BadLiquidationTx(account.Bytes()), nil)
 	if err != nil {
-		fmt.Printf("calculateSeizedTokenAmount, fail to get BadLiquidationTx,err:%v\n", err)
+		fmt.Printf("processLiquidationReq, fail to get BadLiquidationTx,err:%v\n", err)
 		return err
 	}
 	if had {
 		bz, err := db.Get(dbm.BadLiquidationTx(account.Bytes()), nil)
 		if err != nil {
-			fmt.Printf("calculateSeizedTokenAmount, fail to get BadLiquidationTx,err:%v\n", err)
+			fmt.Printf("processLiquidationReq, fail to get BadLiquidationTx,err:%v\n", err)
 			return err
 		}
 
@@ -1475,7 +1340,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 	bigMintedVAIS, err := comptroller.MintedVAIs(nil, account)
 	if err != nil {
-		fmt.Printf("calculateSeizedTokenAmount, fail to get MintedVAIs, account:%v, err:%v\n", account, err)
+		fmt.Printf("processLiquidationReq, fail to get MintedVAIs, account:%v, err:%v\n", account, err)
 		return err
 	}
 	mintedVAIS := decimal.NewFromBigInt(bigMintedVAIS, 0)
@@ -1483,7 +1348,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	var assets []AssetWithPrice
 	markets, err := comptroller.GetAssetsIn(nil, account)
 	if err != nil {
-		fmt.Printf("calculateSeizedTokenAmount, fail to get GetAssetsIn, account:%v, err:%v\n", account, err)
+		fmt.Printf("processLiquidationReq, fail to get GetAssetsIn, account:%v, err:%v\n", account, err)
 		return err
 	}
 
@@ -1491,12 +1356,12 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 		errCode, bigBalance, bigBorrow, bigExchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
 		//fmt.Printf("bigBalance:%v, bigBorrow:%v, bigExchangeRate:%v\n", bigBalance, bigBorrow, bigExchangeRate)
 		if err != nil {
-			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAccountSnapshot, account:%v, err:%v\n", account, err)
+			fmt.Printf("processLiquidationReq, fail to get GetAccountSnapshot, account:%v, err:%v\n", account, err)
 			return err
 		}
 
 		if errCode.Cmp(BigZero) != 0 {
-			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAccountSnapshot, account:%v, errCode:%v\n", account, errCode)
+			fmt.Printf("processLiquidationReq, fail to get GetAccountSnapshot, account:%v, errCode:%v\n", account, errCode)
 			return err
 		}
 
@@ -1514,13 +1379,13 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 		}
 
 		//use feedprice if exist
-		for _, feededPrice := range feededPrices.Prices {
-			if symbols[feededPrice.Address] == symbol {
-				price = feededPrice.Price
-			} else if strings.Contains(symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
-				price = feededPrice.Price
-			}
-		}
+		//for _, feededPrice := range feededPrices.Prices {
+		//	if symbols[feededPrice.Address] == symbol {
+		//		price = feededPrice.Price
+		//	} else if strings.Contains(symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
+		//		price = feededPrice.Price
+		//	}
+		//}
 
 		exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
 		balance := decimal.NewFromBigInt(bigBalance, 0) //vToken Amount
@@ -1556,12 +1421,12 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 	if !withFeedPrice {
 		errCode, _, shortfall, err := comptroller.GetAccountLiquidity(callOptions, account)
 		if err != nil {
-			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAccountLiquidity, account:%v, err:%v \n", account, err)
+			fmt.Printf("processLiquidationReq, fail to get GetAccountLiquidity, account:%v, err:%v \n", account, err)
 			return err
 		}
 		if errCode.Cmp(BigZero) != 0 || shortfall.Cmp(BigZero) != 1 {
-			err := fmt.Errorf("calculateSeizedTokenAmount, fail to get GetAccountLiquidity, account:%v, errCode:%v, shortfall:%v \n", account, errCode, shortfall)
-			fmt.Printf("calculateSeizedTokenAmount, fail to get GetAccountLiquidity, account:%v, errCode:%v, shortfall:%v \n", account, errCode, shortfall)
+			err := fmt.Errorf("processLiquidationReq, fail to get GetAccountLiquidity, account:%v, errCode:%v, shortfall:%v \n", account, errCode, shortfall)
+			fmt.Printf("processLiquidationReq, fail to get GetAccountLiquidity, account:%v, errCode:%v, shortfall:%v \n", account, errCode, shortfall)
 			return err
 		}
 	}
@@ -1614,18 +1479,18 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 		repayAmount = repayValue.Truncate(0).Sub(decimal.NewFromInt(100))
 		errCode, bigSeizedCTokenAmount, err = comptroller.LiquidateVAICalculateSeizeTokens(callOptions, tokens[seizedSymbol].Address, repayAmount.BigInt())
 		if err != nil {
-			fmt.Printf("calculateSeizedTokenAmount, fail to get LiquidateVAICalculateSeizeTokens, account:%v, err:%v\n", account, err)
+			fmt.Printf("processLiquidationReq, fail to get LiquidateVAICalculateSeizeTokens, account:%v, err:%v\n", account, err)
 			return err
 		}
 		if errCode.Cmp(BigZero) != 0 {
-			fmt.Printf("calculateSeizedTokenAmount, fail to get LiquidateVAICalculateSeizeTokens, account:%v, errCode:%v\n", account, errCode)
+			fmt.Printf("processLiquidationReq, fail to get LiquidateVAICalculateSeizeTokens, account:%v, errCode:%v\n", account, errCode)
 			return fmt.Errorf("%v", errCode)
 		}
 	} else {
 		bigBorrowBalanceStored, err := vbep20s[tokens[repaySymbol].Address].BorrowBalanceStored(callOptions, account)
 		//fmt.Printf("repaySymbol:%v, bigBorrowBalancedStored:%v\n", repaySymbol, bigBorrowBalanceStored)
 		if err != nil {
-			fmt.Printf("calculateSeizedTokenAmount, fail to get BorrowBalanceStored, account:%v, err:%v\n", account, err)
+			fmt.Printf("processLiquidationReq, fail to get BorrowBalanceStored, account:%v, err:%v\n", account, err)
 			return err
 		}
 		repayAmount = decimal.NewFromBigInt(bigBorrowBalanceStored, 0).Mul(closeFactor).Div(EXPSACLE) //repayValue.Mul(EXPSACLE).Div(assets[repayIndex].Price)
@@ -1633,11 +1498,11 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 		errCode, bigSeizedCTokenAmount, err = comptroller.LiquidateCalculateSeizeTokens(callOptions, tokens[repaySymbol].Address, tokens[seizedSymbol].Address, repayAmount.BigInt())
 		if err != nil {
-			fmt.Printf("calculateSeizedTokenAmount, fail to get LiquidateCalculateSeizeTokens, account:%v, err:%v\n", account, err)
+			fmt.Printf("processLiquidationReq, fail to get LiquidateCalculateSeizeTokens, account:%v, err:%v\n", account, err)
 			return err
 		}
 		if errCode.Cmp(BigZero) != 0 {
-			fmt.Printf("calculateSeizedTokenAmount, fail to get LiquidateCalculateSeizeTokens, account:%v, errCode:%v\n", account, errCode)
+			fmt.Printf("processLiquidationReq, fail to get LiquidateCalculateSeizeTokens, account:%v, errCode:%v\n", account, errCode)
 			return fmt.Errorf("%v", errCode)
 		}
 	}
@@ -1655,7 +1520,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 
 	//massProfit := seizedUnderlyingTokenValue.Sub(repayValue)
 	//if massProfit.Cmp(ProfitThreshold) == -1 {
-	//	fmt.Printf("calculateSeizedTokenAmount, profit:%v < 20USDT, omit\n", massProfit.Div(EXPSACLE))
+	//	fmt.Printf("processLiquidationReq, profit:%v < 20USDT, omit\n", massProfit.Div(EXPSACLE))
 	//	return nil
 	//}
 
@@ -1693,7 +1558,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			//repay VAI, capture vUSDT, vBUSD, vDAI, swap part vUSDT/vBUSD/vDAI to VAI, flashLoan from VAI-wBNB pair.
 			flashLoanFrom, err := pancakeFactory.GetPair(nil, VAIAddress, tokens["vBNB"].UnderlyingAddress)
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case6, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
+				fmt.Printf("processLiquidationReq case6, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
 				return err
 			}
 
@@ -1701,13 +1566,13 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			path1 := s.buildVAIPaths(seizedSymbol, repaySymbol, tokens)
 			amountsIn, err := pancakeRouter.GetAmountsIn(callOptions, flashLoanReturnAmount.BigInt(), path1) //amountsIn[0] is the stablecoin needed.
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case6, fail to get GetAmountsIn, account:%v, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
+				fmt.Printf("processLiquidationReq case6, fail to get GetAmountsIn, account:%v, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
 				return err
 			}
 
 			remain := seizedUnderlyingTokenAmount.Sub(decimal.NewFromBigInt(amountsIn[0], 0))
 			profit := remain.Mul(tokens[seizedSymbol].Price).Div(EXPSACLE).Sub(gasFee)
-			fmt.Printf("calculateSeizedTokenAmount case6: repaySymbol is VAI and seizedSymbol is stable coin\n")
+			fmt.Printf("processLiquidationReq case6: repaySymbol is VAI and seizedSymbol is stable coin\n")
 			fmt.Printf("height:%v, account:%v, repaySymbol:%v, repayUnderlyingAmount:%v, seizedSymbol:%v, seizedVTokenAmount:%v, seizedUnderlyingAmount:%v, seizedValue:%v, flashLoanReturnAmout:%v, remain:%v, gasFee:%v, profit:%v\n", currentHeight, account, repaySymbol, repayAmount, seizedSymbol, seizedVTokenAmount, seizedUnderlyingTokenAmount, seizedUnderlyingTokenValue, flashLoanReturnAmount, remain, gasFee, profit.Div(EXPSACLE))
 			fmt.Printf("flashLoanFrom:%v, path1:%+v, path2:%+v, addresses:%+v\n", flashLoanFrom, path1, nil, addresses)
 
@@ -1727,7 +1592,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			//case7.2 repay VAI, capture wETH, swap wETH to VAI, swap wETH to USDT, flashLoan from VAI-wBNB pair
 			flashLoanFrom, err := pancakeFactory.GetPair(nil, VAIAddress, tokens["vBUSD"].UnderlyingAddress)
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case7, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
+				fmt.Printf("processLiquidationReq case7, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
 				return err
 			}
 
@@ -1735,7 +1600,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			path1 := s.buildVAIPaths(seizedSymbol, repaySymbol, tokens)
 			amountIns, err := pancakeRouter.GetAmountsIn(callOptions, flashLoanReturnAmount.BigInt(), path1)
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case7, fail to get GetAmountsIn, account:%V, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
+				fmt.Printf("processLiquidationReq case7, fail to get GetAmountsIn, account:%V, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
 				return err
 			}
 
@@ -1744,14 +1609,14 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			path2 := s.buildPaths(seizedSymbol, "vUSDT", tokens)
 			amountsOut, err := pancakeRouter.GetAmountsOut(callOptions, remain.Truncate(0).BigInt(), path2)
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case7, fail to get GetAmountsOut, account:%v paths:%v, err:%v\n", account, path2, err)
+				fmt.Printf("processLiquidationReq case7, fail to get GetAmountsOut, account:%v paths:%v, err:%v\n", account, path2, err)
 				return err
 			}
 
 			usdtAmount := decimal.NewFromBigInt(amountsOut[len(amountsOut)-1], 0)
 			profit := usdtAmount.Mul(tokens["vUSDT"].Price).Div(EXPSACLE).Sub(gasFee)
 
-			fmt.Printf("calculateSeizedTokenAmount case7: repaySymbol is VAI and seizedSymbol is not stable coin\n")
+			fmt.Printf("processLiquidationReq case7: repaySymbol is VAI and seizedSymbol is not stable coin\n")
 			fmt.Printf("height:%v, account:%v, repaySymbol:%v, repayUnderlyingAmount:%v, seizedSymbol:%v, seizedVTokenAmount:%v, seizedUnderlyingAmount:%v, seizedValue:%v, flashLoanReturnAmout:%v, remain:%v, gasFee:%v, profit:%v\n", currentHeight, account, repaySymbol, repayAmount, seizedSymbol, seizedVTokenAmount, seizedUnderlyingTokenAmount, seizedUnderlyingTokenValue, flashLoanReturnAmount, remain, gasFee, profit.Div(EXPSACLE))
 			fmt.Printf("flashLoanFrom:%v, path1:%+v, path2:%+v, addresses:%+v\n", flashLoanFrom, path1, path2, addresses)
 
@@ -1785,11 +1650,11 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			profit := (remain.Mul(tokens[seizedSymbol].Price).Div(EXPSACLE)).Sub(gasFee)
 			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, tokens[repaySymbol].UnderlyingAddress, repayAmount, nil, nil)
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case1, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
+				fmt.Printf("processLiquidationReq case1, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
 				return err
 			}
 
-			fmt.Printf("calculateSeizedTokenAmount case1: seizedSymbol == repaySymbol and symbol is a stable coin\n")
+			fmt.Printf("processLiquidationReq case1: seizedSymbol == repaySymbol and symbol is a stable coin\n")
 			fmt.Printf("height:%v, account:%v, repaySymbol:%v, repayUnderlyingAmount:%v, seizedSymbol:%v, seizedVTokenAmount:%v, seizedUnderlyingAmount:%v, seizedValue:%v, flashLoanReturnAmout:%v, remain:%v, gasFee:%v, profit:%v\n", currentHeight, account, repaySymbol, repayAmount, seizedSymbol, seizedVTokenAmount, seizedUnderlyingTokenAmount, seizedUnderlyingTokenValue, flashLoanReturnAmount, remain, gasFee, profit.Div(EXPSACLE))
 			fmt.Printf("flashLoanFrom:%v, path1:%+v, path2:%+v, addresses:%+v\n", flashLoanFrom, nil, nil, addresses)
 
@@ -1812,7 +1677,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			path2 := s.buildPaths(seizedSymbol, "vUSDT", tokens)
 			amountsOut, err := pancakeRouter.GetAmountsOut(callOptions, remain.Truncate(0).BigInt(), path2)
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case2:, fail to get GetAmountsout, account:%v, paths:%v, amountIn:%v, err:%v\n", account, path2, remain.Truncate(0), err)
+				fmt.Printf("processLiquidationReq case2:, fail to get GetAmountsout, account:%v, paths:%v, amountIn:%v, err:%v\n", account, path2, remain.Truncate(0), err)
 				return err
 			}
 
@@ -1820,11 +1685,11 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			profit := (usdtAmount.Mul(tokens["vUSDT"].Price).Div(EXPSACLE)).Sub(gasFee)
 			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, tokens[repaySymbol].UnderlyingAddress, repayAmount, nil, path2)
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case2, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
+				fmt.Printf("processLiquidationReq case2, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
 				return err
 			}
 
-			fmt.Printf("calculateSeizedTokenAmount case2: seizedSymbol == repaySymbol and symbol is not a stable coin\n")
+			fmt.Printf("processLiquidationReq case2: seizedSymbol == repaySymbol and symbol is not a stable coin\n")
 			fmt.Printf("height:%v, account:%v, repaySymbol:%v, repayUnderlyingAmount:%v, seizedSymbol:%v, seizedVTokenAmount:%v, seizedUnderlyingAmount:%v, seizedValue:%v, flashLoanReturnAmout:%v, remain:%v, gasFee:%v, profit:%v\n", currentHeight, account, repaySymbol, repayAmount, seizedSymbol, seizedVTokenAmount, seizedUnderlyingTokenAmount, seizedUnderlyingTokenValue, flashLoanReturnAmount, remain, gasFee, profit.Div(EXPSACLE))
 			fmt.Printf("flashLoanFrom:%v, path1:%+v, path2:%+v, addresses:%+v\n", flashLoanFrom, nil, path2, addresses)
 
@@ -1849,7 +1714,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 		path1 := s.buildPaths(seizedSymbol, repaySymbol, tokens)
 		amountsIn, err := pancakeRouter.GetAmountsIn(callOptions, flashLoanReturnAmount.BigInt(), path1) //amountsIn[0] is the stablecoin needed.
 		if err != nil {
-			fmt.Printf("calculateSeizedTokenAmount case3, fail to get GetAmountsIn, account:%v, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
+			fmt.Printf("processLiquidationReq case3, fail to get GetAmountsIn, account:%v, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
 			return err
 		}
 
@@ -1857,11 +1722,11 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 		profit := remain.Mul(tokens[seizedSymbol].Price).Div(EXPSACLE).Sub(gasFee)
 		flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, tokens[repaySymbol].UnderlyingAddress, repayAmount, path1, nil)
 		if err != nil {
-			fmt.Printf("calculateSeizedTokenAmount case3, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
+			fmt.Printf("processLiquidationReq case3, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
 			return err
 		}
 
-		fmt.Printf("calculateSeizedTokenAmount case3: seizedSymbol != repaySymbol and seizedSymbol stable coin\n")
+		fmt.Printf("processLiquidationReq case3: seizedSymbol != repaySymbol and seizedSymbol stable coin\n")
 		fmt.Printf("height:%v, account:%v, repaySymbol:%v, repayUnderlyingAmount:%v, seizedSymbol:%v, seizedVTokenAmount:%v, seizedUnderlyingAmount:%v, seizedValue:%v, flashLoanReturnAmout:%v, remain:%v, gasFee:%v, profit:%v\n", currentHeight, account, repaySymbol, repayAmount, seizedSymbol, seizedVTokenAmount, seizedUnderlyingTokenAmount, seizedUnderlyingTokenValue, flashLoanReturnAmount, remain, gasFee, profit.Div(EXPSACLE))
 		fmt.Printf("flashLoanFrom:%v, path1:%+v, path2:%+v, addresses:%+v\n", flashLoanFrom, path1, nil, addresses)
 
@@ -1883,7 +1748,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			path1 := s.buildPaths(seizedSymbol, repaySymbol, tokens)
 			amountsOut, err := pancakeRouter.GetAmountsOut(callOptions, seizedUnderlyingTokenAmount.Truncate(0).BigInt(), path1)
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case4, fail to get GetAmountsIn, account:%V, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
+				fmt.Printf("processLiquidationReq case4, fail to get GetAmountsIn, account:%V, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
 				return err
 			}
 
@@ -1891,11 +1756,11 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			profit := remain.Mul(tokens[repaySymbol].Price).Div(EXPSACLE).Sub(gasFee)
 			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, tokens[repaySymbol].UnderlyingAddress, repayAmount, path1, nil)
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case4, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
+				fmt.Printf("processLiquidationReq case4, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
 				return err
 			}
 
-			fmt.Printf("calculateSeizedTokenAmount case4: seizedSymbol is not stable coin, repaySymbol is stable coin\n")
+			fmt.Printf("processLiquidationReq case4: seizedSymbol is not stable coin, repaySymbol is stable coin\n")
 			fmt.Printf("height:%v, account:%v, repaySymbol:%v, repayUnderlyingAmount:%v, seizedSymbol:%v, seizedVTokenAmount:%v, seizedUnderlyingAmount:%v, seizedValue:%v, flashLoanReturnAmout:%v, remain:%v, gasFee:%v, profit:%v\n", currentHeight, account, repaySymbol, repayAmount, seizedSymbol, seizedVTokenAmount, seizedUnderlyingTokenAmount, seizedUnderlyingTokenValue, flashLoanReturnAmount, remain, gasFee, profit.Div(EXPSACLE))
 			fmt.Printf("flashLoanFrom:%v, path1:%+v, path2:%+v, addresses:%+v\n", flashLoanFrom, path1, nil, addresses)
 
@@ -1915,7 +1780,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			path1 := s.buildPaths(seizedSymbol, repaySymbol, tokens)
 			amountIns, err := pancakeRouter.GetAmountsIn(callOptions, flashLoanReturnAmount.BigInt(), path1)
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case5, fail to get GetAmountsIn, account:%V, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
+				fmt.Printf("processLiquidationReq case5, fail to get GetAmountsIn, account:%V, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
 				return err
 			}
 
@@ -1924,7 +1789,7 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			path2 := s.buildPaths(seizedSymbol, "vUSDT", tokens)
 			amountsOut, err := pancakeRouter.GetAmountsOut(callOptions, remain.Truncate(0).BigInt(), path2)
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case5, fail to get GetAmountsOut, account:%v paths:%v, err:%v\n", account, path2, err)
+				fmt.Printf("processLiquidationReq case5, fail to get GetAmountsOut, account:%v paths:%v, err:%v\n", account, path2, err)
 				return err
 			}
 
@@ -1932,11 +1797,11 @@ func (s *Syncer) calculateSeizedTokenAmount(liquidation *Liquidation) error {
 			profit := usdtAmount.Mul(tokens["vUSDT"].Price).Div(EXPSACLE).Sub(gasFee)
 			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, tokens[repaySymbol].UnderlyingAddress, repayAmount, path1, path2)
 			if err != nil {
-				fmt.Printf("calculateSeizedTokenAmount case2, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
+				fmt.Printf("processLiquidationReq case2, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
 				return err
 			}
 
-			fmt.Printf("calculateSeizedTokenAmount case5: seizedSymbol and repaySymbol are not stable coin\n")
+			fmt.Printf("processLiquidationReq case5: seizedSymbol and repaySymbol are not stable coin\n")
 			fmt.Printf("height:%v, account:%v, repaySymbol:%v, repayUnderlyingAmount:%v, seizedSymbol:%v, seizedVTokenAmount:%v, seizedUnderlyingAmount:%v, seizedValue:%v, flashLoanReturnAmout:%v, remain:%v, gasFee:%v, profit:%v\n", currentHeight, account, repaySymbol, repayAmount, seizedSymbol, seizedVTokenAmount, seizedUnderlyingTokenAmount, seizedUnderlyingTokenValue, flashLoanReturnAmount, remain, gasFee, profit.Div(EXPSACLE))
 			fmt.Printf("flashLoanFrom:%v, path1:%+v, path2:%+v, addresses:%+v\n", flashLoanFrom, path1, path2, addresses)
 
@@ -2030,29 +1895,6 @@ func (s *Syncer) storeAccount(account common.Address, info AccountInfo) {
 	db.Put(dbm.AccountStoreKey(accountBytes), bz, nil)
 	db.Put(dbm.BorrowersStoreKey(accountBytes), accountBytes, nil)
 }
-
-//
-//func (s *Syncer) checkFlashLoanFromBalance(tokens map[string]*TokenInfo, repaySymbol string, flashLoanFrom common.Address, repayAmount decimal.Decimal) error {
-//	repayBep20, err := venus.NewBep20(tokens[repaySymbol].UnderlyingAddress, s.c)
-//	if err != nil {
-//		fmt.Printf("checkFlashLoanFromBalance, fail to build repaybep20, repaySymbol:%v, err:%v\n", repaySymbol, err)
-//		return err
-//	}
-//
-//	balance, err := repayBep20.BalanceOf(nil, flashLoanFrom)
-//	if err != nil {
-//		fmt.Printf("checkFlashLoanFromBalance, fail to get repaybep20 balance, repaySymbol:%v, err:%v\n", repaySymbol, err)
-//		return err
-//	}
-//
-//	if decimal.NewFromBigInt(balance, 0).Cmp(repayAmount) == -1 {
-//		fmt.Printf("checkFlashLoanFromBalance, flashLoanFrom has insufficient balance, repaySymbol:%v, flashLoanFrom:%v\n", repaySymbol, flashLoanFrom)
-//		err := fmt.Errorf("checkFlashLoanFromBalance, flashLoanFrom has insufficient balance, repaySymbol:%v, flashLoanFrom:%v\n", repaySymbol, flashLoanFrom)
-//		return err
-//	}
-//
-//	return nil
-//}
 
 func copySymbols(src map[common.Address]string) map[common.Address]string {
 	dst := make(map[common.Address]string)
