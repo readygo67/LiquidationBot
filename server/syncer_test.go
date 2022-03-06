@@ -314,27 +314,6 @@ func TestFormulateUniswapPath4(t *testing.T) {
 	amountsIn, err := pancakeRouter.GetAmountsIn(nil, amountOut, tmpPaths)
 	require.NoError(t, err)
 	t.Logf("amountsIn%v", amountsIn)
-
-	//for _, interSymbol := range interSymbols {
-	//	for symbol, _ := range tokens {
-	//		if symbol == interSymbol {
-	//			continue
-	//		}
-	//
-	//		pair, _ := pancakeFactory.GetPair(nil, tokens[interSymbol].UnderlyingAddress, tokens[symbol].UnderlyingAddress)
-	//		if pair.String() != "0x0000000000000000000000000000000000000000" {
-	//			connection[interSymbol]++
-	//		} else {
-	//			fmt.Printf("missed %v%v path\n", interSymbol, symbol)
-	//		}
-	//	}
-	//
-	//}
-	//
-	//for _, interSymbol := range interSymbols {
-	//	fmt.Printf("%v's connection %v\n", interSymbol, connection[interSymbol])
-	//}
-
 }
 
 func TestFormulateUniswapPath(t *testing.T) {
@@ -380,16 +359,6 @@ func TestFormulateUniswapPath(t *testing.T) {
 				tmpPaths[2] = dstToken.UnderlyingAddress
 				paths[srcSymbol+dstSymbol] = tmpPaths
 			} else {
-				////select the deepest market as flashloan from
-				//srcAmout, err := srcBep20.BalanceOf(nil, pair)
-				//if err != nil {
-				//	srcAmout = big.NewInt(0)
-				//}
-				//if srcAmout.Cmp(maxSrcAmount) == 1 {
-				//	maxSrcAmount = srcAmout
-				//	maxSrcMaret = pair
-				//}
-
 				//formulate the path
 				tmpPaths := make([]common.Address, 2)
 				tmpPaths[0] = tokens[srcSymbol].UnderlyingAddress
@@ -616,6 +585,7 @@ func TestStoreAndDeleteAccount(t *testing.T) {
 	}
 	info := AccountInfo{
 		HealthFactor: healthFactor,
+		MaxLoanValue: MaxLoanValueThreshold.Mul(decimal.NewFromInt(2)),
 		Assets:       assets,
 	}
 
@@ -715,6 +685,7 @@ func TestStoreAndDeleteAccount1(t *testing.T) {
 	}
 	info := AccountInfo{
 		HealthFactor: healthFactor,
+		MaxLoanValue: MaxLoanValueThreshold.Mul(decimal.NewFromInt(2)),
 		Assets:       assets,
 	}
 
@@ -764,6 +735,7 @@ func TestStoreAndDeleteAccount1(t *testing.T) {
 
 	info = AccountInfo{
 		HealthFactor: healthFactor,
+		MaxLoanValue: MaxLoanValueThreshold.Div(decimal.NewFromInt(2)),
 		Assets:       assets,
 	}
 
@@ -774,6 +746,14 @@ func TestStoreAndDeleteAccount1(t *testing.T) {
 
 	err = json.Unmarshal(bz, &got)
 	require.NoError(t, err)
+
+	has, err = db.Has(dbm.LiquidationNonProfitStoreKey(account.Bytes()), nil)
+	require.NoError(t, err)
+	require.True(t, has)
+
+	bz, err = db.Get(dbm.LiquidationNonProfitStoreKey(account.Bytes()), nil)
+	require.NoError(t, err)
+	require.Equal(t, bz, account.Bytes())
 
 	for _, asset := range assets {
 		//fmt.Printf("symbol:%v\n", asset.Symbol)
@@ -809,6 +789,47 @@ func TestCalculateExchangeRate(t *testing.T) {
 	//rateExp := big.NewInt(0).Div(sumExp, supply)
 	////fmt.Printf("rateExp:%v\n", rateExp)
 	require.Equal(t, "202001285536565656590891932", rateExp.Truncate(0).String())
+}
+
+func TestFeedPricesWithUpdateDB(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	require.NoError(t, err)
+	rpcURL := "ws://42.3.146.198:21994"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
+
+	oldPrice := sync.tokens["vBTC"].Price
+	oldHeight := sync.tokens["vBTC"].PriceUpdateHeight
+	newPrice := oldPrice.Mul(decimal.New(103, -2))
+
+	time.Sleep(10 * time.Second)
+	height, err := sync.c.BlockNumber(context.Background())
+
+	feededPrice := FeededPrice{
+		Symbol:  "vBTC",
+		Address: sync.tokens["vBTC"].Address,
+		Price:   newPrice,
+	}
+	feededPrices := &FeededPrices{
+		Prices: []FeededPrice{feededPrice},
+		Height: height,
+	}
+	sync.processFeededPrices(feededPrices)
+
+	require.EqualValues(t, sync.tokens["vBTC"].Price, oldPrice)
+	require.Equal(t, sync.tokens["vBTC"].PriceUpdateHeight, oldHeight)
+	require.EqualValues(t, sync.tokens["vBTC"].FeedPrice, newPrice)
+	require.Equal(t, sync.tokens["vBTC"].FeedPriceUpdateHeihgt, height)
 }
 
 func TestSyncOneAccount(t *testing.T) {
@@ -1369,14 +1390,18 @@ func TestSyncOneAccountWithFeededPrices(t *testing.T) {
 	}
 	sync.syncOneAccountWithFeededPrices(account, feedPrices)
 
-	cinfo, ok := <-sync.concernedAccountInfoCh
-	if ok {
-		t.Logf("cinfo:%+v\n", cinfo.toReadable())
+	bz, err = db.Get(dbm.AccountStoreKey(accountBytes), nil)
+	err = json.Unmarshal(bz, &info)
+	t.Logf("info after feededPrice:%+v\n", info.toReadable())
+
+	if info.HealthFactor.Cmp(Decimal1P0) == -1 {
+		priorityliquidation := <-sync.priortyLiquidationCh
+		t.Logf("liquiadtion:%+v\n", priorityliquidation)
 	}
 
-	priorityliquidation, ok := <-sync.priortyLiquidationCh
-	if ok {
-		t.Logf("liquiadtion:%+v\n", priorityliquidation)
+	if info.HealthFactor.Cmp(Decimal1P1) == -1 {
+		cinfo := <-sync.concernedAccountInfoCh
+		t.Logf("cinfo:%+v\n", cinfo.toReadable())
 	}
 }
 
@@ -1466,7 +1491,7 @@ func TestSyncOneAccountWithFeededPrices1(t *testing.T) {
 	sync.processLiquidationReq(priorityliquidation)
 }
 
-func TestDoFeedPricesPrice(t *testing.T) {
+func TestProcessFeedPricesPrice(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	require.NoError(t, err)
 	rpcURL := "ws://42.3.146.198:21994"
@@ -1547,16 +1572,118 @@ func TestDoFeedPricesPrice(t *testing.T) {
 		Prices: []FeededPrice{feedPrice},
 		Height: height,
 	}
-	sync.doFeededPrices(feedPrices)
+	sync.processFeededPrices(feedPrices)
+
+	if len(sync.highPriorityAccountSyncCh) != 0 {
+		accountWithFeededPrice := <-sync.highPriorityAccountSyncCh
+		require.Equal(t, account, accountWithFeededPrice.Addresses[0])
+		require.EqualValues(t, *feedPrices, *accountWithFeededPrice.FeededPrices)
+		t.Logf("highPriorityAccountCh:%v", accountWithFeededPrice)
+	}
+
+	if len(sync.lowPriorityAccountSyncCh) != 0 {
+		accountWithFeededPrice := <-sync.lowPriorityAccountSyncCh
+		require.Equal(t, account, accountWithFeededPrice.Addresses[0])
+		require.EqualValues(t, *feedPrices, *accountWithFeededPrice.FeededPrices)
+		t.Logf("lowPriorityAccountCh:%v", accountWithFeededPrice)
+	}
 
 	require.Equal(t, sync.tokens["vBTC"].Price, oldPrice)
 	require.Equal(t, sync.tokens["vBTC"].PriceUpdateHeight, oldPriceUpdateHeight)
 	require.Equal(t, sync.tokens["vBTC"].FeedPrice, newPrice)
 	require.Equal(t, sync.tokens["vBTC"].FeedPriceUpdateHeihgt, height)
-
 }
 
-func TestDoFeedPricesPrice1(t *testing.T) {
+func TestTestProcessFeedPricesVibrationExceed5Percent(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	require.NoError(t, err)
+	rpcURL := "ws://42.3.146.198:21994"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
+	account := common.HexToAddress("0xF5A008a26c8C06F0e778ac07A0db9a2f42423c84") //0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B
+	accountBytes := account.Bytes()
+	err = sync.syncOneAccount(account)
+	require.NoError(t, err)
+
+	exist, err := db.Has(dbm.AccountStoreKey(accountBytes), nil)
+	require.NoError(t, err)
+	require.True(t, exist)
+
+	bz, err := db.Get(dbm.BorrowersStoreKey(accountBytes), nil)
+	require.NoError(t, err)
+	require.Equal(t, account, common.BytesToAddress(bz))
+
+	accounts := []common.Address{}
+	iter := db.NewIterator(util.BytesPrefix(dbm.BorrowersPrefix), nil)
+	for iter.Next() {
+		accounts = append(accounts, common.BytesToAddress(iter.Value()))
+	}
+	require.Equal(t, 1, len(accounts))
+
+	bz, err = db.Get(dbm.AccountStoreKey(accountBytes), nil)
+	var info AccountInfo
+	err = json.Unmarshal(bz, &info)
+	t.Logf("info:%+v\n", info.toReadable())
+
+	for _, asset := range info.Assets {
+		symbol := asset.Symbol
+
+		bz, err = db.Get(dbm.MarketStoreKey([]byte(symbol), accountBytes), nil)
+		require.NoError(t, err)
+		require.Equal(t, account, common.BytesToAddress(bz))
+
+		prefix := append(dbm.MarketPrefix, []byte(symbol)...)
+		accounts = []common.Address{}
+		iter = db.NewIterator(util.BytesPrefix(prefix), nil)
+		for iter.Next() {
+			accounts = append(accounts, common.BytesToAddress(iter.Value()))
+		}
+		require.Equal(t, 1, len(accounts))
+	}
+
+	key := getLiquidationKey(info.MaxLoanValue, info.HealthFactor, accountBytes)
+	bz, err = db.Get(key, nil)
+	require.NoError(t, err)
+	require.Equal(t, account, common.BytesToAddress(bz))
+
+	time.Sleep(10 * time.Second)
+
+	height, err := sync.c.BlockNumber(context.Background())
+	require.NoError(t, err)
+
+	oldPrice := sync.tokens["vBTC"].Price
+	oldPriceUpdateHeight := sync.tokens["vBTC"].PriceUpdateHeight
+
+	feedPrice := FeededPrice{
+		Address: sync.tokens["vBTC"].Address,
+		Price:   sync.tokens["vBTC"].Price.Div(decimal.NewFromInt(2)),
+	}
+
+	feedPrices := &FeededPrices{
+		Prices: []FeededPrice{feedPrice},
+		Height: height,
+	}
+	sync.processFeededPrices(feedPrices)
+	require.Equal(t, 0, len(sync.highPriorityAccountSyncCh))
+	require.Equal(t, 0, len(sync.lowPriorityAccountSyncCh))
+
+	require.Equal(t, sync.tokens["vBTC"].Price, oldPrice)
+	require.Equal(t, sync.tokens["vBTC"].PriceUpdateHeight, oldPriceUpdateHeight)
+	require.True(t, sync.tokens["vBTC"].FeedPrice.Cmp(decimal.Zero) == 0)
+	require.EqualValues(t, sync.tokens["vBTC"].FeedPriceUpdateHeihgt, 0)
+}
+
+func TestProcessFeedPricesPrice1(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	require.NoError(t, err)
 	rpcURL := "ws://42.3.146.198:21994"
@@ -1637,7 +1764,22 @@ func TestDoFeedPricesPrice1(t *testing.T) {
 		Prices: []FeededPrice{feedPrice},
 		Height: height,
 	}
-	sync.doFeededPrices(feedPrices)
+
+	sync.processFeededPrices(feedPrices)
+
+	if len(sync.highPriorityAccountSyncCh) != 0 {
+		accountWithFeededPrice := <-sync.highPriorityAccountSyncCh
+		require.Equal(t, account, accountWithFeededPrice.Addresses[0])
+		require.EqualValues(t, *feedPrices, *accountWithFeededPrice.FeededPrices)
+		t.Logf("highPriorityAccountCh:%v", accountWithFeededPrice)
+	}
+
+	if len(sync.lowPriorityAccountSyncCh) != 0 {
+		accountWithFeededPrice := <-sync.lowPriorityAccountSyncCh
+		require.Equal(t, account, accountWithFeededPrice.Addresses[0])
+		require.EqualValues(t, *feedPrices, *accountWithFeededPrice.FeededPrices)
+		t.Logf("lowPriorityAccountCh:%v", accountWithFeededPrice)
+	}
 
 	require.Equal(t, sync.tokens["vBTC"].Price, oldPrice)
 	require.Equal(t, sync.tokens["vBTC"].PriceUpdateHeight, oldPriceUpdateHeight)
@@ -1645,7 +1787,7 @@ func TestDoFeedPricesPrice1(t *testing.T) {
 	require.Equal(t, sync.tokens["vBTC"].FeedPriceUpdateHeihgt, height)
 }
 
-func TestDoFeedPricesPriceVibrationExceed5Percent(t *testing.T) {
+func TestSyncAccountLoopWithFeedPricesPrice(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	require.NoError(t, err)
 	rpcURL := "ws://42.3.146.198:21994"
@@ -1714,65 +1856,108 @@ func TestDoFeedPricesPriceVibrationExceed5Percent(t *testing.T) {
 
 	oldPrice := sync.tokens["vBTC"].Price
 	oldPriceUpdateHeight := sync.tokens["vBTC"].PriceUpdateHeight
+	newPrice := oldPrice.Mul(decimal.New(96, -2))
 
 	feedPrice := FeededPrice{
+		Symbol:  "vBTC",
 		Address: sync.tokens["vBTC"].Address,
-		Price:   sync.tokens["vBTC"].Price.Div(decimal.NewFromInt(2)),
+		Price:   newPrice,
 	}
 
 	feedPrices := &FeededPrices{
 		Prices: []FeededPrice{feedPrice},
 		Height: height,
 	}
-	sync.doFeededPrices(feedPrices)
+	sync.processFeededPrices(feedPrices)
+
+	sync.wg.Add(1)
+	go sync.syncAccountLoop()
+	time.Sleep(10 * time.Second)
+	close(sync.quitCh)
 
 	require.Equal(t, sync.tokens["vBTC"].Price, oldPrice)
 	require.Equal(t, sync.tokens["vBTC"].PriceUpdateHeight, oldPriceUpdateHeight)
-	require.True(t, sync.tokens["vBTC"].FeedPrice.Cmp(decimal.Zero) == 0)
-	require.EqualValues(t, sync.tokens["vBTC"].FeedPriceUpdateHeihgt, 0)
+	require.Equal(t, sync.tokens["vBTC"].FeedPrice, newPrice)
+	require.Equal(t, sync.tokens["vBTC"].FeedPriceUpdateHeihgt, height)
+
+	bz, err = db.Get(dbm.AccountStoreKey(accountBytes), nil)
+	err = json.Unmarshal(bz, &info)
+	t.Logf("after process feededPriceinfo:%+v\n", info.toReadable())
 }
 
-//func TestScanAllBorrowers(t *testing.T) {
-//	ctx := context.Background()
-//
-//	cfg, err := config.New("../config.yml")
-//	rpcURL := "http://42.3.146.198:21993"
-//	c, err := ethclient.Dial(rpcURL)
-//
-//	db, err := dbm.NewDB("testdb1")
-//	require.NoError(t, err)
-//	defer db.Close()
-//	defer os.RemoveAll("testdb1")
-//
-//	_, err = c.BlockNumber(ctx)
-//	require.NoError(t, err)
-//
-//	sync := NewSyncer(c, db, cfg)
-//	start := big.NewInt(13000000) //big.NewInt(14747565)
-//	db.Put(dbm.KeyLastHandledHeight, start.Bytes(), nil)
-//	db.Put(dbm.KeyBorrowerNumber, big.NewInt(0).Bytes(), nil)
-//
-//	sync.Start()
-//	time.Sleep(time.Second * 120)
-//	sync.Stop()
-//
-//	bz, err := db.Get(dbm.KeyLastHandledHeight, nil)
-//	end := big.NewInt(0).SetBytes(bz)
-//	t.Logf("end height:%v\n", end.Int64())
-//
-//	bz, err = db.Get(dbm.KeyBorrowerNumber, nil)
-//	num := big.NewInt(0).SetBytes(bz).Int64()
-//	t.Logf("num:%v\n", num)
-//
-//	iter := db.NewIterator(util.BytesPrefix(dbm.BorrowersPrefix), nil)
-//	defer iter.Release()
-//	t.Logf("borrows address")
-//	for iter.Next() {
-//		addr := common.BytesToAddress(iter.Value())
-//		t.Logf("%v\n", addr.String())
-//	}
-//}
-//
+func TestSyncAccountLoopWithBackgroundSync(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	require.NoError(t, err)
+	rpcURL := "ws://42.3.146.198:21994"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	liquidationCh := make(chan *Liquidation, 64)
+	priorityliquidationCh := make(chan *Liquidation, 64)
+	feededPricesCh := make(chan *FeededPrices, 64)
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
+	account := common.HexToAddress("0xF5A008a26c8C06F0e778ac07A0db9a2f42423c84") //0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B
+	accountBytes := account.Bytes()
+	err = sync.syncOneAccount(account)
+	require.NoError(t, err)
+
+	exist, err := db.Has(dbm.AccountStoreKey(accountBytes), nil)
+	require.NoError(t, err)
+	require.True(t, exist)
+
+	bz, err := db.Get(dbm.BorrowersStoreKey(accountBytes), nil)
+	require.NoError(t, err)
+	require.Equal(t, account, common.BytesToAddress(bz))
+
+	accounts := []common.Address{}
+	iter := db.NewIterator(util.BytesPrefix(dbm.BorrowersPrefix), nil)
+	for iter.Next() {
+		accounts = append(accounts, common.BytesToAddress(iter.Value()))
+	}
+	require.Equal(t, 1, len(accounts))
+
+	bz, err = db.Get(dbm.AccountStoreKey(accountBytes), nil)
+	var info AccountInfo
+	err = json.Unmarshal(bz, &info)
+	t.Logf("info:%+v\n", info.toReadable())
+
+	for _, asset := range info.Assets {
+		symbol := asset.Symbol
+
+		bz, err = db.Get(dbm.MarketStoreKey([]byte(symbol), accountBytes), nil)
+		require.NoError(t, err)
+		require.Equal(t, account, common.BytesToAddress(bz))
+
+		prefix := append(dbm.MarketPrefix, []byte(symbol)...)
+		accounts = []common.Address{}
+		iter = db.NewIterator(util.BytesPrefix(prefix), nil)
+		for iter.Next() {
+			accounts = append(accounts, common.BytesToAddress(iter.Value()))
+		}
+		require.Equal(t, 1, len(accounts))
+	}
+
+	key := getLiquidationKey(info.MaxLoanValue, info.HealthFactor, accountBytes)
+	bz, err = db.Get(key, nil)
+	require.NoError(t, err)
+	require.Equal(t, account, common.BytesToAddress(bz))
+
+	sync.backgroundAccountSyncCh <- account
+	sync.wg.Add(1)
+	go sync.syncAccountLoop()
+	time.Sleep(10 * time.Second)
+	close(sync.quitCh)
+
+	bz, err = db.Get(dbm.AccountStoreKey(accountBytes), nil)
+	err = json.Unmarshal(bz, &info)
+	t.Logf("after background ysnc info:%+v\n", info.toReadable())
+}
+
 func TestScanAllBorrowers1(t *testing.T) {
 	ctx := context.Background()
 	cfg, err := config.New("../config.yml")
@@ -2542,7 +2727,7 @@ func verifyTokens(t *testing.T, sync *Syncer) {
 func getLiquidationKey(maxLoanValue, healthFactor decimal.Decimal, accountBytes []byte) []byte {
 	var key []byte
 	if maxLoanValue.Cmp(MaxLoanValueThreshold) == -1 {
-		key = dbm.LiquidationNoAssetStoreKey(accountBytes)
+		key = dbm.LiquidationNonProfitStoreKey(accountBytes)
 	} else {
 		if healthFactor.Cmp(Decimal1P0) == -1 {
 			key = dbm.LiquidationBelow1P0StoreKey(accountBytes)
