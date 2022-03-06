@@ -31,12 +31,12 @@ import (
 const (
 	ConfirmHeight                    = 0
 	ScanSpan                         = 1000
-	SyncIntervalBelow1P0             = 1 //in secs
-	SyncIntervalBelow1P1             = 1
-	SyncIntervalBelow1P5             = 9
-	SyncIntervalBelow2P0             = 18
-	SyncIntervalAbove2P0             = 60
-	SyncIntervalNoProfit             = 3600
+	SyncIntervalBelow1P0             = 60 //in secs
+	SyncIntervalBelow1P1             = 60
+	SyncIntervalBelow1P5             = 360
+	SyncIntervalBelow2P0             = 720
+	SyncIntervalAbove2P0             = 1800
+	SyncIntervalNoProfit             = 60
 	MonitorLiquidationInterval       = 120
 	ForbiddenPeriodForBadLiquidation = 200 //200 block
 )
@@ -97,6 +97,11 @@ type FeededPrices struct {
 	Height uint64
 }
 
+type AccountsWithFeedPrices struct {
+	Addresses    []common.Address
+	FeededPrices *FeededPrices
+}
+
 type Liquidation struct {
 	Address      common.Address
 	HealthFactor decimal.Decimal
@@ -143,25 +148,28 @@ type Syncer struct {
 	c  *ethclient.Client
 	db *leveldb.DB
 
-	oracle                 *venus.PriceOracle
-	comptroller            *venus.Comptroller
-	pancakeRouter          *venus.IPancakeRouter02
-	pancakeFactory         *venus.IPancakeFactory
-	closeFactor            decimal.Decimal
-	symbols                map[common.Address]string
-	tokens                 map[string]*TokenInfo
-	flashLoanPools         map[string][]common.Address
-	vbep20s                map[common.Address]*venus.Vbep20
-	liquidator             *venus.IQingsuan
-	PrivateKey             *ecdsa.PrivateKey
-	m                      sync.Mutex
-	wg                     sync.WaitGroup
-	quitCh                 chan struct{}
-	forceUpdatePricesCh    chan struct{}
-	feededPricesCh         chan *FeededPrices
-	liquidationCh          chan *Liquidation
-	priortyLiquidationCh   chan *Liquidation
-	concernedAccountInfoCh chan *ConcernedAccountInfo
+	oracle                    *venus.PriceOracle
+	comptroller               *venus.Comptroller
+	pancakeRouter             *venus.IPancakeRouter02
+	pancakeFactory            *venus.IPancakeFactory
+	closeFactor               decimal.Decimal
+	symbols                   map[common.Address]string
+	tokens                    map[string]*TokenInfo
+	flashLoanPools            map[string][]common.Address
+	vbep20s                   map[common.Address]*venus.Vbep20
+	liquidator                *venus.IQingsuan
+	PrivateKey                *ecdsa.PrivateKey
+	m                         sync.Mutex
+	wg                        sync.WaitGroup
+	quitCh                    chan struct{}
+	forceUpdatePricesCh       chan struct{}
+	feededPricesCh            chan *FeededPrices
+	liquidationCh             chan *Liquidation
+	priortyLiquidationCh      chan *Liquidation
+	concernedAccountInfoCh    chan *ConcernedAccountInfo
+	regularAccountSyncCh      chan common.Address
+	lowPriorityAccountSyncCh  chan *AccountsWithFeedPrices
+	highPriorityAccountSyncCh chan *AccountsWithFeedPrices
 }
 
 func init() {
@@ -356,26 +364,29 @@ func NewSyncer(
 	}
 
 	return &Syncer{
-		c:                      c,
-		db:                     db,
-		oracle:                 oracle,
-		comptroller:            comptroller,
-		pancakeRouter:          pancakeRouter,
-		pancakeFactory:         pancakeFactory,
-		closeFactor:            closeFactor,
-		tokens:                 tokens,
-		flashLoanPools:         flashLoanPool,
-		symbols:                symbols,
-		vbep20s:                vbep20s,
-		liquidator:             liquidator,
-		PrivateKey:             privateKey,
-		m:                      m,
-		quitCh:                 make(chan struct{}),
-		forceUpdatePricesCh:    make(chan struct{}),
-		feededPricesCh:         feededPricesCh,
-		liquidationCh:          liquidationCh,
-		priortyLiquidationCh:   priorityLiquationCh,
-		concernedAccountInfoCh: make(chan *ConcernedAccountInfo, 4096),
+		c:                         c,
+		db:                        db,
+		oracle:                    oracle,
+		comptroller:               comptroller,
+		pancakeRouter:             pancakeRouter,
+		pancakeFactory:            pancakeFactory,
+		closeFactor:               closeFactor,
+		tokens:                    tokens,
+		flashLoanPools:            flashLoanPool,
+		symbols:                   symbols,
+		vbep20s:                   vbep20s,
+		liquidator:                liquidator,
+		PrivateKey:                privateKey,
+		m:                         m,
+		quitCh:                    make(chan struct{}),
+		forceUpdatePricesCh:       make(chan struct{}),
+		feededPricesCh:            feededPricesCh,
+		liquidationCh:             liquidationCh,
+		priortyLiquidationCh:      priorityLiquationCh,
+		concernedAccountInfoCh:    make(chan *ConcernedAccountInfo, 4096),
+		regularAccountSyncCh:      make(chan common.Address, 8192),
+		lowPriorityAccountSyncCh:  make(chan *AccountsWithFeedPrices, 8192),
+		highPriorityAccountSyncCh: make(chan *AccountsWithFeedPrices, 248),
 	}
 }
 
@@ -559,19 +570,40 @@ func (s *Syncer) doFeededPrices(feededPrices *FeededPrices) {
 		//fmt.Printf("doFeededPrices, symbol:%v, feededPrice:%v, accounts:%v\n", symbol, feededPrice, accounts)
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(len(accounts))
-	sem := make(semaphore, runtime.NumCPU())
-	for _, account_ := range accounts {
-		account := account_
-		sem.Acquire()
-		go func() {
-			defer sem.Release()
-			defer wg.Done()
-			s.syncOneAccountWithFeededPrices(account, feededPrices)
-		}()
+	priorityAccountMap := make(map[common.Address]bool)
+	iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P1Prefix), nil)
+	for iter.Next() {
+		accountBytes := iter.Value()
+		priorityAccountMap[common.BytesToAddress(accountBytes)] = true
 	}
-	wg.Wait()
+	iter.Release()
+
+	var highPriorityAccounts []common.Address
+	var lowPriorityAccounts []common.Address
+
+	for _, account := range accounts {
+		if priorityAccountMap[account] {
+			highPriorityAccounts = append(highPriorityAccounts, account)
+		} else {
+			lowPriorityAccounts = append(lowPriorityAccounts, account)
+		}
+	}
+
+	if len(highPriorityAccounts) != 0 {
+		s.highPriorityAccountSyncCh <- &AccountsWithFeedPrices{
+			Addresses:    highPriorityAccounts,
+			FeededPrices: feededPrices,
+		}
+	}
+
+	if len(lowPriorityAccounts) != 0 {
+		for _, account := range lowPriorityAccounts {
+			s.lowPriorityAccountSyncCh <- &AccountsWithFeedPrices{
+				Addresses:    []common.Address{account},
+				FeededPrices: feededPrices,
+			}
+		}
+	}
 }
 
 /*
@@ -592,6 +624,48 @@ func (s *Syncer) syncAccounts(accounts []common.Address) {
 	wg.Wait()
 }
 */
+
+func (s *Syncer) syncAccountLoop() {
+	defer s.wg.Done()
+
+	for {
+		select {
+		case <-s.quitCh:
+			return
+		case data := <-s.highPriorityAccountSyncCh:
+			accounts := data.Addresses
+			feededPrices := data.FeededPrices
+			var wg sync.WaitGroup
+			wg.Add(len(accounts))
+			sem := make(semaphore, runtime.NumCPU())
+			for _, account_ := range accounts {
+				account := account_
+				sem.Acquire()
+				go func() {
+					defer sem.Release()
+					defer wg.Done()
+					s.syncOneAccountWithFeededPrices(account, feededPrices)
+				}()
+			}
+			wg.Wait()
+
+		case data := <-s.lowPriorityAccountSyncCh:
+			accounts := data.Addresses
+			feededPrices := data.FeededPrices
+			if len(s.highPriorityAccountSyncCh) != 0 {
+				break
+			}
+			s.syncOneAccountWithFeededPrices(accounts[0], feededPrices)
+
+		case account := <-s.regularAccountSyncCh:
+			if len(s.highPriorityAccountSyncCh) != 0 {
+				break
+			}
+			s.syncOneAccount(account)
+		}
+	}
+}
+
 func (s *Syncer) syncAllBorrowers() {
 	defer s.wg.Done()
 	db := s.db
@@ -697,14 +771,12 @@ func (s *Syncer) syncLiquidationBelow1P0() {
 			fmt.Printf("%vth sync below 1.0 start @ %v\n", count, time.Now())
 			count++
 
-			var accounts []common.Address
 			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P0Prefix), nil)
 			for iter.Next() {
-				accounts = append(accounts, common.BytesToAddress(iter.Value()))
+				s.regularAccountSyncCh <- common.BytesToAddress(iter.Value())
 			}
 			iter.Release()
 
-			s.syncAccounts(accounts)
 			t.Reset(time.Second * SyncIntervalBelow1P0)
 		}
 	}
@@ -726,14 +798,12 @@ func (s *Syncer) syncLiquidationBelow1P1() {
 			//fmt.Printf("%vth sync below 1.1 start @ %v\n", count, time.Now())
 			count++
 
-			var accounts []common.Address
 			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P1Prefix), nil)
 			for iter.Next() {
-				accounts = append(accounts, common.BytesToAddress(iter.Value()))
+				s.regularAccountSyncCh <- common.BytesToAddress(iter.Value())
 			}
 			iter.Release()
 
-			s.syncAccounts(accounts)
 			t.Reset(time.Second * SyncIntervalBelow1P1)
 		}
 	}
@@ -755,14 +825,12 @@ func (s *Syncer) syncLiquidationBelow1P5() {
 			fmt.Printf("%vth sync below 1.5 start @ %v\n", count, time.Now())
 			count++
 
-			var accounts []common.Address
 			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P5Prefix), nil)
 			for iter.Next() {
-				accounts = append(accounts, common.BytesToAddress(iter.Value()))
+				s.regularAccountSyncCh <- common.BytesToAddress(iter.Value())
 			}
 			iter.Release()
 
-			s.syncAccounts(accounts)
 			t.Reset(time.Second * SyncIntervalBelow1P5)
 		}
 	}
@@ -784,14 +852,12 @@ func (s *Syncer) syncLiquidationBelow2P0() {
 			fmt.Printf("%vth sync below 2.0 start @ %v\n", count, time.Now())
 			count++
 
-			var accounts []common.Address
 			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow2P0Prefix), nil)
 			for iter.Next() {
-				accounts = append(accounts, common.BytesToAddress(iter.Value()))
+				s.regularAccountSyncCh <- common.BytesToAddress(iter.Value())
 			}
 			iter.Release()
 
-			s.syncAccounts(accounts)
 			t.Reset(time.Second * SyncIntervalBelow2P0)
 		}
 	}
@@ -813,14 +879,12 @@ func (s *Syncer) syncLiquidationAbove2P0() {
 			fmt.Printf("%vth sync above 2.0 start @ %v\n", count, time.Now())
 			count++
 
-			var accounts []common.Address
 			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationAbove2P0Prefix), nil)
 			for iter.Next() {
-				accounts = append(accounts, common.BytesToAddress(iter.Value()))
+				s.regularAccountSyncCh <- common.BytesToAddress(iter.Value())
 			}
 			iter.Release()
 
-			s.syncAccounts(accounts)
 			t.Reset(time.Second * SyncIntervalAbove2P0)
 		}
 	}
@@ -842,14 +906,12 @@ func (s *Syncer) syncLiquidationNonProfit() {
 			fmt.Printf("%vth sync non profit account start @ %v\n", count, time.Now())
 			count++
 
-			var accounts []common.Address
 			iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationNonProfitPrefix), nil)
 			for iter.Next() {
-				accounts = append(accounts, common.BytesToAddress(iter.Value()))
+				s.regularAccountSyncCh <- common.BytesToAddress(iter.Value())
 			}
 
 			iter.Release()
-			s.syncAccounts(accounts)
 			t.Reset(time.Second * SyncIntervalNoProfit)
 		}
 	}
@@ -1009,7 +1071,7 @@ func (s *Syncer) printConcernedAccountInfo() {
 		select {
 		case <-s.quitCh:
 			return
-		case info :=<-s.concernedAccountInfoCh:
+		case info := <-s.concernedAccountInfoCh:
 			fmt.Printf("ConernedAccountInfo:%+v\n", info)
 		}
 	}
@@ -1263,6 +1325,7 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 		MaxLoanValue: maxLoanValue,
 		Assets:       assets,
 	}
+	s.updateDB(account, info)
 
 	currentHeight, _ := s.c.BlockNumber(context.Background())
 	//fmt.Printf("syncOneAccountWithFeededPrices,account:%v, height:%v,  totalCollateral:%v, totalLoan:%v, info:%+v\n", account, currentHeight, totalCollateral, totalLoan, info.toReadable())
