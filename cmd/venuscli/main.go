@@ -130,8 +130,10 @@ func accountCommand(configFile *string) *cobra.Command {
 				return err
 			}
 
-			bz, err := db.Get(dbm.AccountStoreKey([]byte(args[0])), nil)
+			accountBytes := common.HexToAddress(args[0]).Bytes()
+			bz, err := db.Get(dbm.AccountStoreKey(accountBytes), nil)
 			if err != nil {
+				fmt.Printf("can not found account:%v\n", args[0])
 				return err
 			}
 
@@ -141,7 +143,7 @@ func accountCommand(configFile *string) *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("account:%v\n :%v\n", args[0], info)
+			fmt.Printf("account:%v\n :%+v\n", args[0], info)
 			return nil
 		},
 	}
@@ -153,7 +155,7 @@ func listCommand(configFile *string) *cobra.Command {
 		Use:   "list [1.0]",
 		Short: "list account whose health factor below assigned level",
 		Long: `list account whose health factor below assigned level, currently the following levels are provided
-               x<1.0, 1.0 <= x < 1.2, 1.2 <= x < 1.5, 1.5 <= x < 2.0, x > 2.0`,
+               x<1.0, 1.0 <= x < 1.1, 1.1 <= x < 1.5, 1.5 <= x < 2.0, x > 2.0, x=255 for nonProfit`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.New(*configFile)
@@ -176,16 +178,20 @@ func listCommand(configFile *string) *cobra.Command {
 			}
 
 			var prefix []byte
-			if level.Cmp(server.Decimal1P0) == -1 {
-				prefix = dbm.LiquidationBelow1P0Prefix
-			} else if level.Cmp(server.Decimal1P1) == -1 {
-				prefix = dbm.LiquidationBelow1P1Prefix
-			} else if level.Cmp(server.Decimal1P5) == -1 {
-				prefix = dbm.LiquidationBelow1P5Prefix
-			} else if level.Cmp(server.Decimal2P0) == -1 {
-				prefix = dbm.LiquidationBelow2P0Prefix
+			if level.Cmp(server.DecimalNonProfit) == 0 {
+				prefix = dbm.LiquidationNonProfitPrefix
 			} else {
-				prefix = dbm.LiquidationAbove2P0Prefix
+				if level.Cmp(server.Decimal1P0) != 1 {
+					prefix = dbm.LiquidationBelow1P0Prefix
+				} else if level.Cmp(server.Decimal1P1) != 1 {
+					prefix = dbm.LiquidationBelow1P1Prefix
+				} else if level.Cmp(server.Decimal1P5) != 1 {
+					prefix = dbm.LiquidationBelow1P5Prefix
+				} else if level.Cmp(server.Decimal2P0) != 1 {
+					prefix = dbm.LiquidationBelow2P0Prefix
+				} else {
+					prefix = dbm.LiquidationAbove2P0Prefix
+				}
 			}
 
 			iter := db.NewIterator(util.BytesPrefix(prefix), nil)

@@ -1,10 +1,10 @@
-rpc_url:  http://42.3.146.198:21993
+rpc_url:  ws://192.168.88.144:28546
 network: mainnet
 comptroller : "0xfD36E2c2a6789Db23113685031d7F16329158384"
-oracle: "0x516c18DC440f107f12619a6d2cc320622807d0eE"
+oracle: "0xd8B6dA2bfEC71D684D3E2a2FC9492dDad5C3787F"
 pancake_router: "0x10ED43C718714eb63d5aA57B78B54704E256024E"
 liquidator: ""
-private_key: "811737801d908d6ba78a59b9e705562bcf70ee0f707952c4ad22252599b17737"
+private_key: "811737801d908d6ba78a59b9e705562bcf70ee0f707952c4ad22252599b17738"
 db: maindb
 start_heihgt: 13000000
 override: false

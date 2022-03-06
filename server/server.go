@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/readygo67/LiquidationBot/config"
 	dbm "github.com/readygo67/LiquidationBot/db"
@@ -13,6 +12,8 @@ import (
 )
 
 const DefaultStartHeigt = uint64(13000000)
+
+var logger = log.New(os.Stdout, "", log.Ldate|log.Ltime|log.Lmicroseconds)
 
 func Start(cfg *config.Config) error {
 	client, err := ethclient.Dial(cfg.RPCURL)
@@ -37,7 +38,7 @@ func Start(cfg *config.Config) error {
 		storedHeight = big.NewInt(0).SetBytes(bz).Uint64()
 		startHeight = storedHeight
 	}
-	fmt.Printf("startHeight:%v, storedHeight:%v, configHeight:%v\n", startHeight, storedHeight, cfg.StartHeihgt)
+	logger.Printf("startHeight:%v, storedHeight:%v, configHeight:%v\n", startHeight, storedHeight, cfg.StartHeihgt)
 	if cfg.Override {
 		startHeight = cfg.StartHeihgt
 	}

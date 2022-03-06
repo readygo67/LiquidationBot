@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"github.com/stretchr/testify/require"
 	"testing"
 )
@@ -9,9 +8,9 @@ import (
 func TestConfig(t *testing.T) {
 	config, err := New("../config.yml")
 	require.NoError(t, err)
-	fmt.Printf("db:%+v\n", config.DB)
-	fmt.Printf("comptroller:%+v\n", config.Comptroller)
-	fmt.Printf("override:%v\n", config.Override)
-	fmt.Printf("StartHeight:%v\n", config.StartHeihgt)
-	fmt.Printf("PrivateKey:%v\n", config.PrivateKey)
+	logger.Printf("db:%+v\n", config.DB)
+	logger.Printf("comptroller:%+v\n", config.Comptroller)
+	logger.Printf("override:%v\n", config.Override)
+	logger.Printf("StartHeight:%v\n", config.StartHeihgt)
+	logger.Printf("PrivateKey:%v\n", config.PrivateKey)
 }
