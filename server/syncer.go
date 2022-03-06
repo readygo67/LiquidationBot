@@ -36,7 +36,7 @@ const (
 	SyncIntervalBelow1P5                 = 360
 	SyncIntervalBelow2P0                 = 720
 	SyncIntervalAbove2P0                 = 1800
-	SyncIntervalBackGround               = 900
+	SyncIntervalBackGround               = 600
 	SyncIntervalForMarkets               = 6
 	MonitorLiquidationInterval           = 120
 	ForbiddenPeriodForBadLiquidation     = 200 //200 block
@@ -520,7 +520,7 @@ func (s *Syncer) processFeededPrices(feededPrices *FeededPrices) {
 		symbol := symbols[feededPrice.Address]
 		price := tokens[symbol].Price
 		priceDeltaRatio := price.Sub(feededPrice.Price).Abs().Div(price)
-		if priceDeltaRatio.Cmp(decimal.New(5, -2)) == 1 {
+		if priceDeltaRatio.Cmp(decimal.New(20, -2)) == 1 {
 			logger.Printf("processFeededPrices, sybmol:%v，feedPrices %v, originalPrices:%v, vibration %v exceeds 5 percent, height%v\n", symbol, feededPrice.Price, price, priceDeltaRatio, feededPrices.Height)
 			return
 		}
@@ -926,7 +926,8 @@ func (s *Syncer) MonitorTxPoolLoop() {
 
 					data := inputData["_report"].([]byte)
 					numbering := data[32+32+32+32:]
-					numberingmid := numbering[len(numbering)/2 : len(numbering)/2+32]
+					midpos := len(numbering) / 32 / 2
+					numberingmid := numbering[midpos*32 : midpos*32+32]
 					bigFeededPrice := big.NewInt(0).SetBytes(numberingmid)
 
 					symobl := symbols[vTokenAddress]
