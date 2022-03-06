@@ -628,29 +628,35 @@ func (s *Syncer) syncAccountLoop() {
 			s.processHighPriorityAccountSync(req)
 
 		case req := <-s.lowPriorityAccountSyncCh:
-		PRIORITY1:
-			for {
-				select {
-				case innerReq := <-s.highPriorityAccountSyncCh:
-					s.processHighPriorityAccountSync(innerReq)
-				default:
-					break PRIORITY1
-				}
-			}
 
+			//PRIORITY1:
+			//	for {
+			//		select {
+			//		case innerReq := <-s.highPriorityAccountSyncCh:
+			//			s.processHighPriorityAccountSync(innerReq)
+			//		default:
+			//			break PRIORITY1
+			//		}
+			//	}
+			if len(s.highPriorityAccountSyncCh) != 0 {
+				continue
+			}
 			accounts := req.Addresses
 			feededPrices := req.FeededPrices
 			s.syncOneAccountWithFeededPrices(accounts[0], feededPrices)
 
 		case account := <-s.backgroundAccountSyncCh:
-		PRIORITY2:
-			for {
-				select {
-				case innerReq := <-s.highPriorityAccountSyncCh:
-					s.processHighPriorityAccountSync(innerReq)
-				default:
-					break PRIORITY2
-				}
+			//PRIORITY2:
+			//	for {
+			//		select {
+			//		case innerReq := <-s.highPriorityAccountSyncCh:
+			//			s.processHighPriorityAccountSync(innerReq)
+			//		default:
+			//			break PRIORITY2
+			//		}
+			//	}
+			if len(s.highPriorityAccountSyncCh) != 0 {
+				continue
 			}
 			s.syncOneAccount(account)
 		}
