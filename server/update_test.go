@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/readygo67/LiquidationBot/config"
@@ -27,7 +26,7 @@ import (
 //	for iter.Next() {
 //		count0++
 //		accountBytes := iter.Value()
-//		fmt.Printf("account:%v\n", common.BytesToAddress(accountBytes))
+//		logger.Printf("account:%v\n", common.BytesToAddress(accountBytes))
 //		bz, err := db.Get(dbm.AccountStoreKey(accountBytes), nil)
 //		require.NoError(t, err)
 //
@@ -47,8 +46,8 @@ import (
 //			}
 //		}
 //
-//		fmt.Printf("account:%v\n", common.BytesToAddress(accountBytes))
-//		fmt.Printf("before info:%+v\n", info)
+//		logger.Printf("account:%v\n", common.BytesToAddress(accountBytes))
+//		logger.Printf("before info:%+v\n", info)
 //
 //		info.MaxLoan = maxLoan
 //		info.MaxRepay = maxRepay
@@ -65,7 +64,7 @@ import (
 //		err = json.Unmarshal(bz2, newInfo)
 //		require.NoError(t, err)
 //
-//		fmt.Printf("after info:%+v\n", newInfo)
+//		logger.Printf("after info:%+v\n", newInfo)
 //
 //		if maxRepay.Cmp(MaxLoanValueThreshold) == -1 {
 //			count1++
@@ -85,7 +84,7 @@ import (
 //		}
 //	}
 //
-//	fmt.Printf("totalCount:%v, nonProfitCount:%v\n", count0, count1)
+//	logger.Printf("totalCount:%v, nonProfitCount:%v\n", count0, count1)
 //}
 
 func TestDeleteAllKeysExceptBorrowers(t *testing.T) {
@@ -102,7 +101,7 @@ func TestDeleteAllKeysExceptBorrowers(t *testing.T) {
 	//feededPricesCh := make(chan *FeededPrices, 64)
 	//
 	//syncer := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
-	//fmt.Printf("db:%v", syncer.db)
+	//logger.Printf("db:%v", syncer.db)
 	/*
 		AccountPrefix              = []byte("account")
 			MarketPrefix               = []byte("market")
@@ -120,7 +119,7 @@ func TestDeleteAllKeysExceptBorrowers(t *testing.T) {
 		count++
 		addresses = append(addresses, common.BytesToAddress(iter.Value()))
 	}
-	fmt.Printf("total:%v address:%v\n", count, addresses)
+	logger.Printf("total:%v address:%v\n", count, addresses)
 	iter.Release()
 
 	count0 := 0
@@ -137,7 +136,7 @@ func TestDeleteAllKeysExceptBorrowers(t *testing.T) {
 		}
 		db.Delete(dbm.AccountStoreKey(accountBytes), nil)
 	}
-	//fmt.Printf("delete %v account\n", count0)
+	//logger.Printf("delete %v account\n", count0)
 	iter1.Release()
 
 	countBelow1P0 := 0
@@ -147,7 +146,7 @@ func TestDeleteAllKeysExceptBorrowers(t *testing.T) {
 		accountBytes := iter2.Value()
 		db.Delete(dbm.LiquidationBelow1P0StoreKey(accountBytes), nil)
 	}
-	fmt.Printf("delete %v below1P0 account\n", countBelow1P0)
+	logger.Printf("delete %v below1P0 account\n", countBelow1P0)
 	iter2.Release()
 
 	countBelow1P1 := 0
@@ -157,7 +156,7 @@ func TestDeleteAllKeysExceptBorrowers(t *testing.T) {
 		accountBytes := iter3.Value()
 		db.Delete(dbm.LiquidationBelow1P1StoreKey(accountBytes), nil)
 	}
-	fmt.Printf("delete %v below1P1 account\n", countBelow1P1)
+	logger.Printf("delete %v below1P1 account\n", countBelow1P1)
 	iter3.Release()
 
 	countBelow1P5 := 0
@@ -167,7 +166,7 @@ func TestDeleteAllKeysExceptBorrowers(t *testing.T) {
 		accountBytes := iter4.Value()
 		db.Delete(dbm.LiquidationBelow1P5StoreKey(accountBytes), nil)
 	}
-	fmt.Printf("delete %v below1P5 account\n", countBelow1P5)
+	logger.Printf("delete %v below1P5 account\n", countBelow1P5)
 	iter4.Release()
 
 	countBelow2P0 := 0
@@ -177,7 +176,7 @@ func TestDeleteAllKeysExceptBorrowers(t *testing.T) {
 		accountBytes := iter5.Value()
 		db.Delete(dbm.LiquidationBelow2P0StoreKey(accountBytes), nil)
 	}
-	fmt.Printf("delete %v below2P0 account\n", countBelow2P0)
+	logger.Printf("delete %v below2P0 account\n", countBelow2P0)
 	iter5.Release()
 
 	countAbove2P0 := 0
@@ -187,7 +186,7 @@ func TestDeleteAllKeysExceptBorrowers(t *testing.T) {
 		accountBytes := iter6.Value()
 		db.Delete(dbm.LiquidationAbove2P0StoreKey(accountBytes), nil)
 	}
-	fmt.Printf("delete %v above2P0 account\n", countAbove2P0)
+	logger.Printf("delete %v above2P0 account\n", countAbove2P0)
 	iter6.Release()
 
 	countNonProfit := 0
@@ -197,7 +196,7 @@ func TestDeleteAllKeysExceptBorrowers(t *testing.T) {
 		accountBytes := iter7.Value()
 		db.Delete(dbm.LiquidationNonProfitStoreKey(accountBytes), nil)
 	}
-	fmt.Printf("delete %v nonprofit account\n", countNonProfit)
+	logger.Printf("delete %v nonprofit account\n", countNonProfit)
 	iter7.Release()
 	db.Close()
 }
@@ -216,7 +215,7 @@ func TestRebuildDB(t *testing.T) {
 	feededPricesCh := make(chan *FeededPrices, 64)
 
 	syncer := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
-	fmt.Printf("db:%v", syncer.db)
+	logger.Printf("db:%v", syncer.db)
 
 	var addresses []common.Address
 	iter := db.NewIterator(util.BytesPrefix(dbm.BorrowersPrefix), nil)
@@ -225,7 +224,7 @@ func TestRebuildDB(t *testing.T) {
 		count++
 		addresses = append(addresses, common.BytesToAddress(iter.Value()))
 	}
-	//fmt.Printf("total:%v address:%v\n", count, addresses)
+	//logger.Printf("total:%v address:%v\n", count, addresses)
 	iter.Release()
 	syncer.syncAccounts(addresses)
 

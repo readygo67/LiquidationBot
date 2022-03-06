@@ -29,7 +29,7 @@ func TestAccessDB(t *testing.T) {
 	defer iter0.Release()
 	t.Logf("borrows address")
 	for iter0.Next() {
-		fmt.Printf("%v\n", string(iter0.Value()))
+		logger.Printf("%v\n", string(iter0.Value()))
 	}
 
 	for i := 10; i < 20; i++ {
@@ -40,6 +40,6 @@ func TestAccessDB(t *testing.T) {
 	defer iter1.Release()
 	t.Logf("liquidation below 1 address")
 	for iter1.Next() {
-		fmt.Printf("%v\n", string(iter1.Value()))
+		logger.Printf("%v\n", string(iter1.Value()))
 	}
 }
