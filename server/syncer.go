@@ -1153,13 +1153,13 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 		}
 
 		//apply feeded prices if exist
-		//for _, feededPrice := range feededPrices.Prices {
-		//	if symbols[feededPrice.Address] == symbol {
-		//		price = feededPrice.Price
-		//	} else if strings.Contains(symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
-		//		price = feededPrice.Price
-		//	}
-		//}
+		for _, feededPrice := range feededPrices.Prices {
+			if symbols[feededPrice.Address] == symbol {
+				price = feededPrice.Price
+			} else if strings.Contains(symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
+				price = feededPrice.Price
+			}
+		}
 
 		exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
 		balance := decimal.NewFromBigInt(bigBalance, 0)
@@ -1375,6 +1375,15 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 		if tokens[symbol].FeedPriceUpdateHeihgt > tokens[symbol].PriceUpdateHeight {
 			withFeedPrice = true
 			price = tokens[symbol].FeedPrice
+		}
+		
+		//apply feeded prices if exist
+		for _, feededPrice := range feededPrices.Prices {
+			if symbols[feededPrice.Address] == symbol {
+				price = feededPrice.Price
+			} else if strings.Contains(symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
+				price = feededPrice.Price
+			}
 		}
 
 		exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
