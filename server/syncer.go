@@ -521,7 +521,7 @@ func (s *Syncer) processFeededPrices(feededPrices *FeededPrices) {
 		price := tokens[symbol].Price
 		priceDeltaRatio := price.Sub(feededPrice.Price).Abs().Div(price)
 		if priceDeltaRatio.Cmp(decimal.New(5, -2)) == 1 {
-			logger.Printf("processFeededPrices, sybmol:%v feedPrices vibration %v exceeds 5 percent, height%v\n", symbol, priceDeltaRatio, feededPrices.Height)
+			logger.Printf("processFeededPrices, sybmol:%v，feedPrices %v, originalPrices:%v, vibration %v exceeds 5 percent, height%v\n", symbol, feededPrice.Price, price, priceDeltaRatio, feededPrices.Height)
 			return
 		}
 
