@@ -40,6 +40,6 @@ func TestAccessDB(t *testing.T) {
 	defer iter1.Release()
 	t.Logf("liquidation below 1 address")
 	for iter1.Next() {
-		logger.Printf("%v\n", string(iter1.Value()))
+		fmt.Printf("%v\n", string(iter1.Value()))
 	}
 }

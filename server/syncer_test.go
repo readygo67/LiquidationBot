@@ -2462,38 +2462,6 @@ func TestCalculateSeizedTokens(t *testing.T) {
 	}
 }
 
-func TestBuildFlashLoanPool(t *testing.T) {
-	cfg, err := config.New("../config.yml")
-	require.NoError(t, err)
-	rpcURL := "ws://42.3.146.198:21994"
-	c, err := ethclient.Dial(rpcURL)
-
-	db, err := dbm.NewDB("testdb1")
-	require.NoError(t, err)
-	defer db.Close()
-	defer os.RemoveAll("testdb1")
-
-	liquidationCh := make(chan *Liquidation, 64)
-	priorityliquidationCh := make(chan *Liquidation, 64)
-	feededPricesCh := make(chan *FeededPrices, 64)
-
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
-
-	for symbol, pairs := range sync.flashLoanPools {
-		logger.Printf("%v connection:%v\n", symbol, pairs)
-	}
-
-	bep20, err := venus.NewBep20(sync.tokens["vUSDT"].UnderlyingAddress, sync.c)
-	require.NoError(t, err)
-
-	for _, pair := range sync.flashLoanPools["vUSDT"] {
-		balance, err := bep20.BalanceOf(nil, pair)
-		require.NoError(t, err)
-		t.Logf("balance:%v\n", balance)
-	}
-
-}
-
 func TestFilterUSDCLiquidateBorrowEvent(t *testing.T) {
 	ctx := context.Background()
 	//cfg, err := config.New("../config.yml")
