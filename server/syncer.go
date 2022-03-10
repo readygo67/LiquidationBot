@@ -1197,7 +1197,7 @@ func (s *Syncer) syncOneAccountWithFeededPrice(account common.Address, feededPri
 	s.updateDB(account, info)
 
 	//logger.Printf("syncOneAccountWithFeededPrices,account:%v, height:%v,  totalCollateral:%v, totalLoan:%v, info:%+v\n", account, currentHeight, totalCollateral, totalLoan, info.toReadable())
-	if healthFactor.Cmp(decimal.NewFromInt(1)) != 1 {
+	if healthFactor.Cmp(decimal.NewFromInt(1)) == -1 {
 		liquidation := &Liquidation{
 			AccInfo:     info,
 			FeededPrice: feededPrice,

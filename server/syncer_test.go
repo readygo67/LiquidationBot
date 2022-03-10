@@ -23,15 +23,6 @@ import (
 
 var syncer *Syncer
 
-func TestMapStructAssignment(t *testing.T) {
-	testmap := make(map[string]*TokenInfo)
-	tokenInfo := &TokenInfo{
-		Price: decimal.Zero,
-	}
-	testmap["usdt"] = tokenInfo
-	testmap["usdt"].Price = decimal.NewFromInt(1)
-}
-
 func TestGetvAAVEUnderlyingPrice(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	rpcURL := "http://42.3.146.198:21993"
@@ -63,9 +54,40 @@ func TestNewSyncer(t *testing.T) {
 
 	num := big.NewInt(0).SetBytes(bz)
 	require.Equal(t, int64(0), num.Int64())
-
+	//print tokens info
 	for symbol, token := range sync.tokens {
 		logger.Printf("symbol:%v, token:%+v\n", symbol, token)
+	}
+
+	//check flashpool
+	for symbol, pools := range sync.flashLoanPools {
+		t.Logf("%v pools:%v\n", symbol, pools)
+
+		bep20, _ := venus.NewBep20(VAIAddress, c)
+		if symbol != "VAI" {
+			bep20, _ = venus.NewBep20(sync.tokens[symbol].UnderlyingAddress, c)
+		}
+		var balances []*big.Int
+		for _, pair := range pools {
+			balance, _ := bep20.BalanceOf(nil, pair)
+			balances = append(balances, balance)
+		}
+
+		for i := 0; i < len(balances)-1; i++ {
+			for j := i + 1; j < len(balances); j++ {
+				require.True(t, balances[i].Cmp(balances[j]) != -1)
+			}
+		}
+	}
+
+	// check paths
+	for pair, paths := range sync.paths {
+		t.Logf("%v:%v\n", pair, paths)
+
+		symbols := strings.Split(pair, ":")
+		_, amountOut, _ := sync.selectPathWithMaxAmountOut(symbols[0], symbols[1], decimal.New(1000, 18))
+		_, amountIn, _ := sync.selectPathWithMinAmountIn(symbols[0], symbols[1], amountOut)
+		t.Logf("amountIn:%v, amountOut:%v\n", amountIn, amountOut)
 	}
 }
 
@@ -146,112 +168,15 @@ func TestFilterAllCotractsBorrowEvent(t *testing.T) {
 	logger.Printf("end Time:%v\n", time.Now())
 }
 
-//0x05bbf0C12882FDEcd53FD734731ad578aF79621C,0x07d1c21878C2f84BAE1DD3bA2C674d92133cc282,0x0A88bbE6be0005E46F56aA4145c8FB863f9Df627,0x0C13Fafb81AAbA173547eD5D1941bD8b1f182962,
-func TestCalculateHealthFactor(t *testing.T) {
-	cfg, err := config.New("../config.yml")
-	require.NoError(t, err)
-	rpcURL := "http://42.3.146.198:21993"
-	c, err := ethclient.Dial(rpcURL)
-
-	db, err := dbm.NewDB("testdb1")
-	require.NoError(t, err)
-	defer db.Close()
-	defer os.RemoveAll("testdb1")
-
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey)
-	comptroller := sync.comptroller
-	oracle := sync.oracle
-
-	accounts := []string{
-		"0x05bbf0C12882FDEcd53FD734731ad578aF79621C",
-		"0x07d1c21878C2f84BAE1DD3bA2C674d92133cc282",
-		"0x0A88bbE6be0005E46F56aA4145c8FB863f9Df627",
-		"0x0C13Fafb81AAbA173547eD5D1941bD8b1f182962",
-	}
-
-	for _, account := range accounts {
-		_, liquidity, shortfall, err := comptroller.GetAccountLiquidity(nil, common.HexToAddress(account))
-		require.NoError(t, err)
-
-		assets, err := comptroller.GetAssetsIn(nil, common.HexToAddress(account))
-		logger.Printf("assets:%v\n", assets)
-		require.NoError(t, err)
-
-		totalCollateral := decimal.NewFromInt(0)
-		totalLoan := decimal.NewFromInt(0)
-		bigMintedVAIS, err := comptroller.MintedVAIs(nil, common.HexToAddress(account))
-
-		mintedVAIS := decimal.NewFromBigInt(bigMintedVAIS, 0)
-
-		for _, asset := range assets {
-			//logger.Printf("asset:%v\n", asset)
-			marketInfo, err := comptroller.Markets(nil, asset)
-			require.NoError(t, err)
-
-			token, err := venus.NewVbep20(asset, c)
-			require.NoError(t, err)
-
-			errCode, bigBalance, bigBorrow, bigExchangeRate, err := token.GetAccountSnapshot(nil, common.HexToAddress(account))
-			require.NoError(t, err)
-			require.True(t, errCode.Cmp(BigZero) == 0)
-
-			if bigBalance.Cmp(BigZero) == 0 && bigBorrow.Cmp(BigZero) == 0 {
-				continue
-			}
-
-			bigPrice, err := oracle.GetUnderlyingPrice(nil, asset)
-			if bigPrice.Cmp(BigZero) == 0 {
-				continue
-			}
-
-			exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
-			collateralFactor := decimal.NewFromBigInt(marketInfo.CollateralFactorMantissa, 0)
-			price := decimal.NewFromBigInt(bigPrice, 0)
-			balance := decimal.NewFromBigInt(bigBalance, 0)
-			borrow := decimal.NewFromBigInt(bigBorrow, 0)
-			logger.Printf("collateralFactor:%v, price:%v, exchangeRate:%v, balance:%v, borrow:%v\n", collateralFactor, bigPrice, bigExchangeRate, bigBalance, bigBorrow)
-
-			multiplier := collateralFactor.Mul(exchangeRate).Div(EXPSACLE)
-			multiplier = multiplier.Mul(price).Div(EXPSACLE)
-			collateral := balance.Mul(multiplier).Div(EXPSACLE)
-			totalCollateral = totalCollateral.Add(collateral.Truncate(0))
-
-			loan := borrow.Mul(price).Div(EXPSACLE)
-			totalLoan = totalLoan.Add(loan.Truncate(0))
-		}
-
-		totalLoan = totalLoan.Add(mintedVAIS)
-		logger.Printf("totalCollateral:%v, totalLoan:%v\n", totalCollateral.String(), totalLoan)
-		healthFactor := decimal.NewFromInt(100)
-		if totalLoan.Cmp(decimal.Zero) == 1 {
-			healthFactor = totalCollateral.Div(totalLoan)
-		}
-
-		logger.Printf("healthFactor：%v\n", healthFactor)
-		calculatedLiquidity := decimal.NewFromInt(0)
-		calculatedShortfall := decimal.NewFromInt(0)
-		if totalLoan.Cmp(totalCollateral) == 1 {
-			calculatedShortfall = totalLoan.Sub(totalCollateral)
-		} else {
-			calculatedLiquidity = totalCollateral.Sub(totalLoan)
-		}
-
-		logger.Printf("liquidity:%v, calculatedLiquidity:%v\n", liquidity.String(), calculatedLiquidity.String())
-		logger.Printf("shortfall:%v, calculatedShortfall:%v\n", shortfall, calculatedShortfall)
-	}
-}
-
 func TestStoreAndDeleteAccount(t *testing.T) {
-	cfg, err := config.New("../config.yml")
-	rpcURL := "http://42.3.146.198:21993"
-	c, err := ethclient.Dial(rpcURL)
-
 	db, err := dbm.NewDB("testdb1")
 	require.NoError(t, err)
 	defer db.Close()
 	defer os.RemoveAll("testdb1")
 
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey)
+	sync := &Syncer{
+		db: db,
+	}
 
 	healthFactor, _ := decimal.NewFromString("0.9")
 
@@ -264,30 +189,65 @@ func TestStoreAndDeleteAccount(t *testing.T) {
 	vbusdBalance, _ := decimal.NewFromString("0")
 	vbusdtLoan, _ := decimal.NewFromString("500.23")
 
+	/*
+		type Asset struct {
+			Symbol           string
+			Balance          decimal.Decimal
+			Loan             decimal.Decimal
+			CollateralFactor decimal.Decimal
+			BalanceValue     decimal.Decimal
+			CollateralValue  decimal.Decimal
+			LoanValue        decimal.Decimal
+			Price            decimal.Decimal
+			ExchangeRate     decimal.Decimal
+		}
+	*/
 	assets := []Asset{
 		{
-			Symbol:  "vUSDT",
-			Balance: vusdtBalance,
-			Loan:    vusdtLoan,
+			Symbol:           "vUSDT",
+			Balance:          vusdtBalance,
+			Loan:             vusdtLoan,
+			CollateralFactor: decimal.New(8, -1),
+			BalanceValue:     decimal.New(100, 0),
+			CollateralValue:  decimal.New(80, 0),
+			LoanValue:        decimal.New(50, 0),
+			Price:            decimal.New(100, 0),
+			ExchangeRate:     decimal.New(100, 0),
 		},
 		{
-			Symbol:  "vBTC",
-			Balance: vbtcBalance,
-			Loan:    vbtctLoan,
+			Symbol:           "vBTC",
+			Balance:          vbtcBalance,
+			Loan:             vbtctLoan,
+			CollateralFactor: decimal.New(8, -1),
+			BalanceValue:     decimal.New(100, 0),
+			CollateralValue:  decimal.New(80, 0),
+			LoanValue:        decimal.New(50, 0),
+			Price:            decimal.New(100, 0),
+			ExchangeRate:     decimal.New(100, 0),
 		},
 		{
-			Symbol:  "vBUSD",
-			Balance: vbusdBalance,
-			Loan:    vbusdtLoan,
+			Symbol:           "vBUSD",
+			Balance:          vbusdBalance,
+			Loan:             vbusdtLoan,
+			CollateralFactor: decimal.New(8, -1),
+			BalanceValue:     decimal.New(100, 0),
+			CollateralValue:  decimal.New(80, 0),
+			LoanValue:        decimal.New(50, 0),
+			Price:            decimal.New(100, 0),
+			ExchangeRate:     decimal.New(100, 0),
 		},
 	}
+	account := common.HexToAddress("0x332E2Dcd239Bb40d4eb31bcaE213F9F06017a4F3")
 	info := AccountInfo{
-		HealthFactor: healthFactor,
-		MaxLoanValue: MaxLoanValueThreshold.Mul(decimal.NewFromInt(2)),
-		Assets:       assets,
+		Account:       account,
+		HealthFactor:  healthFactor,
+		MaxLoanSymbol: "vBUSD",
+		MintedVAIS:    decimal.New(100, 0),
+		Height:        100,
+		MaxLoanValue:  MaxLoanValueThreshold.Mul(decimal.NewFromInt(2)),
+		Assets:        assets,
 	}
 
-	account := common.HexToAddress("0x332E2Dcd239Bb40d4eb31bcaE213F9F06017a4F3")
 	sync.storeAccount(account, info)
 
 	bz, err := db.Get(dbm.AccountStoreKey(account.Bytes()), nil)
@@ -297,6 +257,7 @@ func TestStoreAndDeleteAccount(t *testing.T) {
 	var got AccountInfo
 	err = json.Unmarshal(bz, &got)
 	require.NoError(t, err)
+	t.Logf("got:%+v\n", got)
 
 	has, err := db.Has(dbm.LiquidationBelow1P0StoreKey(account.Bytes()), nil)
 	require.NoError(t, err)
@@ -318,6 +279,7 @@ func TestStoreAndDeleteAccount(t *testing.T) {
 		prefix := append(dbm.MarketPrefix, []byte(asset.Symbol)...)
 		var accounts []common.Address
 		iter := db.NewIterator(util.BytesPrefix(prefix), nil)
+		defer iter.Release()
 		for iter.Next() {
 			accounts = append(accounts, common.BytesToAddress(iter.Value()))
 		}
@@ -339,16 +301,16 @@ func TestStoreAndDeleteAccount(t *testing.T) {
 }
 
 func TestStoreAndDeleteAccount1(t *testing.T) {
-	cfg, err := config.New("../config.yml")
-	rpcURL := "http://42.3.146.198:21993"
-	c, err := ethclient.Dial(rpcURL)
-
 	db, err := dbm.NewDB("testdb1")
 	require.NoError(t, err)
 	defer db.Close()
 	defer os.RemoveAll("testdb1")
 
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey)
+	//sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey)
+
+	sync := &Syncer{
+		db: db,
+	}
 
 	healthFactor, _ := decimal.NewFromString("1.1")
 	vusdtBalance, _ := decimal.NewFromString("1000000000.0")
@@ -362,28 +324,50 @@ func TestStoreAndDeleteAccount1(t *testing.T) {
 
 	assets := []Asset{
 		{
-			Symbol:  "vUSDT",
-			Balance: vusdtBalance,
-			Loan:    vusdtLoan,
+			Symbol:           "vUSDT",
+			Balance:          vusdtBalance,
+			Loan:             vusdtLoan,
+			CollateralFactor: decimal.New(8, -1),
+			BalanceValue:     decimal.New(100, 0),
+			CollateralValue:  decimal.New(80, 0),
+			LoanValue:        decimal.New(50, 0),
+			Price:            decimal.New(100, 0),
+			ExchangeRate:     decimal.New(100, 0),
 		},
 		{
-			Symbol:  "vBTC",
-			Balance: vbtcBalance,
-			Loan:    vbtctLoan,
+			Symbol:           "vBTC",
+			Balance:          vbtcBalance,
+			Loan:             vbtctLoan,
+			CollateralFactor: decimal.New(8, -1),
+			BalanceValue:     decimal.New(100, 0),
+			CollateralValue:  decimal.New(80, 0),
+			LoanValue:        decimal.New(50, 0),
+			Price:            decimal.New(100, 0),
+			ExchangeRate:     decimal.New(100, 0),
 		},
 		{
-			Symbol:  "vBUSD",
-			Balance: vbusdBalance,
-			Loan:    vbusdtLoan,
+			Symbol:           "vBUSD",
+			Balance:          vbusdBalance,
+			Loan:             vbusdtLoan,
+			CollateralFactor: decimal.New(8, -1),
+			BalanceValue:     decimal.New(100, 0),
+			CollateralValue:  decimal.New(80, 0),
+			LoanValue:        decimal.New(50, 0),
+			Price:            decimal.New(100, 0),
+			ExchangeRate:     decimal.New(100, 0),
 		},
 	}
+	account := common.HexToAddress("0x332E2Dcd239Bb40d4eb31bcaE213F9F06017a4F3")
 	info := AccountInfo{
-		HealthFactor: healthFactor,
-		MaxLoanValue: MaxLoanValueThreshold.Mul(decimal.NewFromInt(2)),
-		Assets:       assets,
+		Account:       account,
+		HealthFactor:  healthFactor,
+		MaxLoanValue:  MaxLoanValueThreshold.Mul(decimal.NewFromInt(2)),
+		MaxLoanSymbol: "vBUSD",
+		MintedVAIS:    decimal.New(100, 0),
+		Height:        100,
+		Assets:        assets,
 	}
 
-	account := common.HexToAddress("0x332E2Dcd239Bb40d4eb31bcaE213F9F06017a4F3")
 	sync.storeAccount(account, info)
 
 	bz, err := db.Get(dbm.AccountStoreKey(account.Bytes()), nil)
@@ -464,7 +448,7 @@ func TestStoreAndDeleteAccount1(t *testing.T) {
 func TestFeedPricesWithUpdateDB(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	require.NoError(t, err)
-	rpcURL := "ws://42.3.146.198:21994"
+	rpcURL := "https://bsc-dataseed.binance.org"
 	c, err := ethclient.Dial(rpcURL)
 
 	db, err := dbm.NewDB("testdb1")
@@ -949,7 +933,7 @@ func TestSyncOneAccountWithIncreaseAccountNumber1(t *testing.T) {
 	}
 }
 
-func TestSyncOneAccountWithFeededPrices(t *testing.T) {
+func TestSyncOneAccountWithFeededPrice(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	require.NoError(t, err)
 	rpcURL := "ws://42.3.146.198:21994"
@@ -1033,7 +1017,7 @@ func TestSyncOneAccountWithFeededPrices(t *testing.T) {
 	}
 }
 
-func TestSyncOneAccountWithFeededPrices1(t *testing.T) {
+func TestSyncOneAccountWithFeededPrice1(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	require.NoError(t, err)
 	rpcURL := "ws://42.3.146.198:21994"
@@ -1101,17 +1085,23 @@ func TestSyncOneAccountWithFeededPrices1(t *testing.T) {
 
 	sync.syncOneAccountWithFeededPrice(account, feedPrice)
 
-	cinfo, ok := <-sync.concernedAccountInfoCh
-	if ok {
+	bz, err = db.Get(dbm.AccountStoreKey(accountBytes), nil)
+	err = json.Unmarshal(bz, &info)
+	t.Logf("info after feededPrice:%+v\n", info.toReadable())
+
+	if info.HealthFactor.Cmp(Decimal1P0) == -1 {
+		priorityliquidation := <-sync.priortyLiquidationCh
+		t.Logf("liquiadtion:%+v\n", priorityliquidation)
+	}
+
+	if info.HealthFactor.Cmp(Decimal1P1) == -1 {
+		cinfo := <-sync.concernedAccountInfoCh
 		t.Logf("cinfo:%+v\n", cinfo.toReadable())
 	}
 
-	priorityliquidation := <-sync.priortyLiquidationCh
-
-	sync.processLiquidationReq(priorityliquidation)
 }
 
-func TestProcessFeedPricesPrice(t *testing.T) {
+func TestProcessFeedPrices(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	require.NoError(t, err)
 	rpcURL := "ws://42.3.146.198:21994"
@@ -1193,102 +1183,13 @@ func TestProcessFeedPricesPrice(t *testing.T) {
 		t.Logf("highPriorityAccountCh:%v", accountWithFeededPrice)
 	}
 
-	if len(sync.lowPriorityAccountSyncCh) != 0 {
-		accountWithFeededPrice := <-sync.lowPriorityAccountSyncCh
-		require.Equal(t, account, accountWithFeededPrice.Addresses[0])
-		require.EqualValues(t, *feededPrice, *accountWithFeededPrice.FeededPrice)
-		t.Logf("lowPriorityAccountCh:%v", accountWithFeededPrice)
-	}
-
 	require.Equal(t, sync.tokens["vBTC"].Price, oldPrice)
 	require.Equal(t, sync.tokens["vBTC"].PriceUpdateHeight, oldPriceUpdateHeight)
 	require.Equal(t, sync.tokens["vBTC"].FeededPrice, newPrice)
 	require.Equal(t, sync.tokens["vBTC"].FeedPriceUpdateHeihgt, height)
 }
 
-func TestTestProcessFeedPricesVibrationExceed5Percent(t *testing.T) {
-	cfg, err := config.New("../config.yml")
-	require.NoError(t, err)
-	rpcURL := "ws://42.3.146.198:21994"
-	c, err := ethclient.Dial(rpcURL)
-
-	db, err := dbm.NewDB("testdb1")
-	require.NoError(t, err)
-	defer db.Close()
-	defer os.RemoveAll("testdb1")
-
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey)
-	account := common.HexToAddress("0xF5A008a26c8C06F0e778ac07A0db9a2f42423c84") //0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B
-	accountBytes := account.Bytes()
-	err = sync.syncOneAccount(account)
-	require.NoError(t, err)
-
-	exist, err := db.Has(dbm.AccountStoreKey(accountBytes), nil)
-	require.NoError(t, err)
-	require.True(t, exist)
-
-	bz, err := db.Get(dbm.BorrowersStoreKey(accountBytes), nil)
-	require.NoError(t, err)
-	require.Equal(t, account, common.BytesToAddress(bz))
-
-	accounts := []common.Address{}
-	iter := db.NewIterator(util.BytesPrefix(dbm.BorrowersPrefix), nil)
-	for iter.Next() {
-		accounts = append(accounts, common.BytesToAddress(iter.Value()))
-	}
-	require.Equal(t, 1, len(accounts))
-
-	bz, err = db.Get(dbm.AccountStoreKey(accountBytes), nil)
-	var info AccountInfo
-	err = json.Unmarshal(bz, &info)
-	t.Logf("info:%+v\n", info.toReadable())
-
-	for _, asset := range info.Assets {
-		symbol := asset.Symbol
-
-		bz, err = db.Get(dbm.MarketStoreKey([]byte(symbol), accountBytes), nil)
-		require.NoError(t, err)
-		require.Equal(t, account, common.BytesToAddress(bz))
-
-		prefix := append(dbm.MarketPrefix, []byte(symbol)...)
-		accounts = []common.Address{}
-		iter = db.NewIterator(util.BytesPrefix(prefix), nil)
-		for iter.Next() {
-			accounts = append(accounts, common.BytesToAddress(iter.Value()))
-		}
-		require.Equal(t, 1, len(accounts))
-	}
-
-	key := getLiquidationKey(info.MaxLoanValue, info.HealthFactor, accountBytes)
-	bz, err = db.Get(key, nil)
-	require.NoError(t, err)
-	require.Equal(t, account, common.BytesToAddress(bz))
-
-	time.Sleep(10 * time.Second)
-
-	height, err := sync.c.BlockNumber(context.Background())
-	require.NoError(t, err)
-
-	oldPrice := sync.tokens["vBTC"].Price
-	oldPriceUpdateHeight := sync.tokens["vBTC"].PriceUpdateHeight
-
-	feedPrice := &FeededPrice{
-		Address: sync.tokens["vBTC"].Address,
-		Price:   sync.tokens["vBTC"].Price.Div(decimal.NewFromInt(2)),
-		Height:  height,
-	}
-
-	sync.processFeededPrice(feedPrice)
-	require.Equal(t, 0, len(sync.highPriorityAccountSyncCh))
-	require.Equal(t, 0, len(sync.lowPriorityAccountSyncCh))
-
-	require.Equal(t, sync.tokens["vBTC"].Price, oldPrice)
-	require.Equal(t, sync.tokens["vBTC"].PriceUpdateHeight, oldPriceUpdateHeight)
-	require.True(t, sync.tokens["vBTC"].FeededPrice.Cmp(decimal.Zero) == 0)
-	require.EqualValues(t, sync.tokens["vBTC"].FeedPriceUpdateHeihgt, 0)
-}
-
-func TestProcessFeedPricesPrice1(t *testing.T) {
+func TestProcessFeedPrice1(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	require.NoError(t, err)
 	rpcURL := "ws://42.3.146.198:21994"
@@ -1383,7 +1284,89 @@ func TestProcessFeedPricesPrice1(t *testing.T) {
 	require.Equal(t, sync.tokens["vBTC"].FeedPriceUpdateHeihgt, height)
 }
 
-func TestSyncAccountLoopWithFeedPricesPrice(t *testing.T) {
+func TestTestProcessFeedPriceVibrationExceed5Percent(t *testing.T) {
+	cfg, err := config.New("../config.yml")
+	require.NoError(t, err)
+	rpcURL := "ws://42.3.146.198:21994"
+	c, err := ethclient.Dial(rpcURL)
+
+	db, err := dbm.NewDB("testdb1")
+	require.NoError(t, err)
+	defer db.Close()
+	defer os.RemoveAll("testdb1")
+
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey)
+	account := common.HexToAddress("0xF5A008a26c8C06F0e778ac07A0db9a2f42423c84") //0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B
+	accountBytes := account.Bytes()
+	err = sync.syncOneAccount(account)
+	require.NoError(t, err)
+
+	exist, err := db.Has(dbm.AccountStoreKey(accountBytes), nil)
+	require.NoError(t, err)
+	require.True(t, exist)
+
+	bz, err := db.Get(dbm.BorrowersStoreKey(accountBytes), nil)
+	require.NoError(t, err)
+	require.Equal(t, account, common.BytesToAddress(bz))
+
+	accounts := []common.Address{}
+	iter := db.NewIterator(util.BytesPrefix(dbm.BorrowersPrefix), nil)
+	for iter.Next() {
+		accounts = append(accounts, common.BytesToAddress(iter.Value()))
+	}
+	require.Equal(t, 1, len(accounts))
+
+	bz, err = db.Get(dbm.AccountStoreKey(accountBytes), nil)
+	var info AccountInfo
+	err = json.Unmarshal(bz, &info)
+	t.Logf("info:%+v\n", info.toReadable())
+
+	for _, asset := range info.Assets {
+		symbol := asset.Symbol
+
+		bz, err = db.Get(dbm.MarketStoreKey([]byte(symbol), accountBytes), nil)
+		require.NoError(t, err)
+		require.Equal(t, account, common.BytesToAddress(bz))
+
+		prefix := append(dbm.MarketPrefix, []byte(symbol)...)
+		accounts = []common.Address{}
+		iter = db.NewIterator(util.BytesPrefix(prefix), nil)
+		for iter.Next() {
+			accounts = append(accounts, common.BytesToAddress(iter.Value()))
+		}
+		require.Equal(t, 1, len(accounts))
+	}
+
+	key := getLiquidationKey(info.MaxLoanValue, info.HealthFactor, accountBytes)
+	bz, err = db.Get(key, nil)
+	require.NoError(t, err)
+	require.Equal(t, account, common.BytesToAddress(bz))
+
+	time.Sleep(10 * time.Second)
+
+	height, err := sync.c.BlockNumber(context.Background())
+	require.NoError(t, err)
+
+	oldPrice := sync.tokens["vBTC"].Price
+	oldPriceUpdateHeight := sync.tokens["vBTC"].PriceUpdateHeight
+
+	feedPrice := &FeededPrice{
+		Address: sync.tokens["vBTC"].Address,
+		Price:   sync.tokens["vBTC"].Price.Div(decimal.NewFromInt(2)),
+		Height:  height,
+	}
+
+	sync.processFeededPrice(feedPrice)
+	require.Equal(t, 0, len(sync.highPriorityAccountSyncCh))
+	require.Equal(t, 0, len(sync.lowPriorityAccountSyncCh))
+
+	require.Equal(t, sync.tokens["vBTC"].Price, oldPrice)
+	require.Equal(t, sync.tokens["vBTC"].PriceUpdateHeight, oldPriceUpdateHeight)
+	require.True(t, sync.tokens["vBTC"].FeededPrice.Cmp(decimal.Zero) == 0)
+	require.EqualValues(t, sync.tokens["vBTC"].FeedPriceUpdateHeihgt, 0)
+}
+
+func TestSyncAccountLoopWithFeedPrice(t *testing.T) {
 	cfg, err := config.New("../config.yml")
 	require.NoError(t, err)
 	rpcURL := "ws://42.3.146.198:21994"
@@ -1540,7 +1523,7 @@ func TestSyncAccountLoopWithBackgroundSync(t *testing.T) {
 
 	bz, err = db.Get(dbm.AccountStoreKey(accountBytes), nil)
 	err = json.Unmarshal(bz, &info)
-	t.Logf("after background ysnc info:%+v\n", info.toReadable())
+	t.Logf("after background sync info:%+v\n", info.toReadable())
 }
 
 func TestScanAllBorrowers1(t *testing.T) {
@@ -1583,6 +1566,7 @@ func TestScanAllBorrowers1(t *testing.T) {
 	}
 }
 
+//
 //func TestProcessLiquidationCase1(t *testing.T) {
 //	cfg, err := config.New("../config.yml")
 //	rpcURL := "http://42.3.146.198:21993"
@@ -1821,218 +1805,6 @@ func TestScanAllBorrowers1(t *testing.T) {
 //		}
 //	}
 //}
-
-func TestFilterUSDCLiquidateBorrowEvent(t *testing.T) {
-	ctx := context.Background()
-	//cfg, err := config.New("../config.yml")
-	rpcURL := "http://42.3.146.198:21993"
-	c, err := ethclient.Dial(rpcURL)
-
-	_, err = c.BlockNumber(ctx)
-	require.NoError(t, err)
-
-	topicLiquidateBorrow := common.HexToHash("0x298637f684da70674f26509b10f07ec2fbc77a335ab1e7d6215a4b2484d8bb52")
-	vbep20Abi, err := abi.JSON(strings.NewReader(venus.Vbep20MetaData.ABI))
-	require.NoError(t, err)
-
-	query := ethereum.FilterQuery{
-		FromBlock: big.NewInt(15803152),
-		//ToBlock:   big.NewInt(1563526),
-		Addresses: []common.Address{common.HexToAddress("0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8")}, //usdc
-		Topics:    [][]common.Hash{{topicLiquidateBorrow}},
-	}
-
-	logs, err := c.FilterLogs(context.Background(), query)
-	require.NoError(t, err)
-	logger.Printf("start Time:%v\n", time.Now())
-	for i, log := range logs {
-		var eve venus.Vbep20LiquidateBorrow
-		err = vbep20Abi.UnpackIntoInterface(&eve, "LiquidateBorrow", log.Data)
-		logger.Printf("%v height:%v, txhash:%v, liquidator:%v borrower:%v, repayAmount:%v, collateral:%v, seizedAmount:%v\n", (i + 1), log.BlockNumber, log.TxHash, eve.Liquidator, eve.Borrower, eve.RepayAmount, eve.VTokenCollateral, eve.SeizeTokens)
-	}
-	logger.Printf("end Time:%v\n", time.Now())
-}
-
-func TestFilterSubscribeUSDCLiquidateBorrowEvent(t *testing.T) {
-	ctx := context.Background()
-	//cfg, err := config.New("../config.yml")
-	rpcURL := "ws://42.3.146.198:21994"
-	c, err := ethclient.Dial(rpcURL)
-
-	_, err = c.BlockNumber(ctx)
-	require.NoError(t, err)
-
-	topicLiquidateBorrow := common.HexToHash("0x298637f684da70674f26509b10f07ec2fbc77a335ab1e7d6215a4b2484d8bb52")
-	vbep20Abi, err := abi.JSON(strings.NewReader(venus.Vbep20MetaData.ABI))
-	require.NoError(t, err)
-
-	query := ethereum.FilterQuery{
-		FromBlock: big.NewInt(15803152),
-		ToBlock:   big.NewInt(15603526),
-		Addresses: []common.Address{common.HexToAddress("0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8")}, //usdc
-		Topics:    [][]common.Hash{{topicLiquidateBorrow}},
-	}
-
-	logs, err := c.FilterLogs(context.Background(), query)
-	require.NoError(t, err)
-	logger.Printf("start Time:%v\n", time.Now())
-	for i, log := range logs {
-		var eve venus.Vbep20LiquidateBorrow
-		err = vbep20Abi.UnpackIntoInterface(&eve, "LiquidateBorrow", log.Data)
-		logger.Printf("%v height:%v, txhash:%v, liquidator:%v borrower:%v, repayAmount:%v, collateral:%v, seizedAmount:%v\n", (i + 1), log.BlockNumber, log.TxHash, eve.Liquidator, eve.Borrower, eve.RepayAmount, eve.VTokenCollateral, eve.SeizeTokens)
-	}
-	logger.Printf("end Time:%v\n", time.Now())
-}
-
-func TestFilterAllVTokensLiquidateBorrowEvent(t *testing.T) {
-	ctx := context.Background()
-	cfg, err := config.New("../config.yml")
-	rpcURL := "http://42.3.146.198:21993"
-	c, err := ethclient.Dial(rpcURL)
-
-	_, err = c.BlockNumber(ctx)
-	require.NoError(t, err)
-
-	db, err := dbm.NewDB("testdb1")
-	require.NoError(t, err)
-	defer db.Close()
-	defer os.RemoveAll("testdb1")
-
-	syncer := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey)
-
-	topicLiquidateBorrow := common.HexToHash("0x298637f684da70674f26509b10f07ec2fbc77a335ab1e7d6215a4b2484d8bb52")
-
-	var addresses []common.Address
-	for _, token := range syncer.tokens {
-		addresses = append(addresses, token.Address)
-	}
-
-	vbep20Abi, err := abi.JSON(strings.NewReader(venus.Vbep20MetaData.ABI))
-	require.NoError(t, err)
-	monitorStartHeight := uint64(15603526)
-
-	for i := 0; i < 10; i++ {
-		monitorEndHeight, err := c.BlockNumber(context.Background())
-		if err != nil {
-			monitorEndHeight = monitorStartHeight
-		}
-		logger.Printf("%vth sync monitor LiquidationBorrow event, startHeight:%v, endHeight:%v \n", (i + 1), monitorStartHeight, monitorEndHeight)
-
-		query := ethereum.FilterQuery{
-			FromBlock: big.NewInt(int64(monitorStartHeight)),
-			ToBlock:   big.NewInt(int64(monitorEndHeight)),
-			Addresses: addresses, //usdc
-			Topics:    [][]common.Hash{{topicLiquidateBorrow}},
-		}
-
-		logs, err := c.FilterLogs(context.Background(), query)
-		if err == nil {
-			for _, log := range logs {
-				var eve venus.Vbep20LiquidateBorrow
-				vbep20Abi.UnpackIntoInterface(&eve, "LiquidateBorrow", log.Data)
-				logger.Printf("LiquidateBorrow event happen @ height:%v, txhash:%v, liquidator:%v borrower:%v, repayAmount:%v, collateral:%v, seizedAmount:%v\n", log.BlockNumber, log.TxHash, eve.Liquidator, eve.Borrower, eve.RepayAmount, eve.VTokenCollateral, eve.SeizeTokens)
-			}
-
-			monitorStartHeight = monitorEndHeight
-		}
-
-		time.Sleep(30 * time.Second)
-	}
-}
-
-func TestFilterAllVTokensLiquidateBorrowEvent1(t *testing.T) {
-	ctx := context.Background()
-	cfg, err := config.New("../config.yml")
-	rpcURL := "http://42.3.146.198:21993"
-	c, err := ethclient.Dial(rpcURL)
-
-	_, err = c.BlockNumber(ctx)
-	require.NoError(t, err)
-
-	db, err := dbm.NewDB("testdb1")
-	require.NoError(t, err)
-	defer db.Close()
-	defer os.RemoveAll("testdb1")
-
-	syncer := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey)
-
-	topicLiquidateBorrow := common.HexToHash("0x298637f684da70674f26509b10f07ec2fbc77a335ab1e7d6215a4b2484d8bb52")
-
-	var addresses []common.Address
-	for _, token := range syncer.tokens {
-		addresses = append(addresses, token.Address)
-	}
-
-	vbep20Abi, err := abi.JSON(strings.NewReader(venus.Vbep20MetaData.ABI))
-	require.NoError(t, err)
-	monitorStartHeight := uint64(15633526)
-
-	monitorEndHeight, err := c.BlockNumber(context.Background())
-	if err != nil {
-		monitorEndHeight = monitorStartHeight
-	}
-	logger.Printf("sync monitor LiquidationBorrow event, startHeight:%v, endHeight:%v \n", monitorStartHeight, monitorEndHeight)
-
-	query := ethereum.FilterQuery{
-		FromBlock: big.NewInt(int64(monitorStartHeight)),
-		ToBlock:   big.NewInt(int64(monitorEndHeight)),
-		Addresses: addresses, //usdc
-		Topics:    [][]common.Hash{{topicLiquidateBorrow}},
-	}
-
-	logs, err := c.FilterLogs(context.Background(), query)
-	if err == nil {
-		for _, log := range logs {
-			var eve venus.Vbep20LiquidateBorrow
-			vbep20Abi.UnpackIntoInterface(&eve, "LiquidateBorrow", log.Data)
-			logger.Printf("LiquidateBorrow event happen @ height:%v, txhash:%v, liquidator:%v borrower:%v, repayAmount:%v, collateral:%v, seizedAmount:%v\n", log.BlockNumber, log.TxHash, eve.Liquidator, eve.Borrower, eve.RepayAmount, eve.VTokenCollateral, eve.SeizeTokens)
-		}
-
-		monitorStartHeight = monitorEndHeight
-	}
-}
-
-func TestMonitorPricesInTxPool(t *testing.T) {
-	ctx := context.Background()
-	cfg, err := config.New("../config.yml")
-	rpcURL := "ws://42.3.146.198:21994"
-	c, err := ethclient.Dial(rpcURL)
-
-	_, err = c.BlockNumber(ctx)
-	require.NoError(t, err)
-
-	db, err := dbm.NewDB("testdb1")
-	require.NoError(t, err)
-	defer db.Close()
-	defer os.RemoveAll("testdb1")
-
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey)
-	t.Logf("before MonitorTxPoolLoop\n")
-	sync.wg.Add(2)
-	go sync.MonitorTxPoolLoop()
-	go func() {
-		defer sync.wg.Done()
-		for {
-			select {
-			case <-sync.quitCh:
-				return
-			case data := <-sync.feededPriceCh:
-				logger.Printf("feedPrice:%v\n", data)
-			}
-		}
-	}()
-	t.Logf("sleep 5 minutes\n")
-	time.Sleep(300 * time.Second)
-	close(sync.quitCh)
-}
-
-func TestAddressEqual(t *testing.T) {
-	account1 := common.HexToAddress("0x26a27B56308FaB4ffE9ad5C80BB0C3Da9152e833")
-	account2 := common.HexToAddress("0x26a27B56308FaB4ffE9ad5C80BB0C3Da9152e833")
-	account3 := common.HexToAddress("0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8")
-	require.True(t, account1 == account2)
-	require.False(t, account1 == account3)
-}
 
 func verifyTokens(t *testing.T, sync *Syncer) {
 	require.Equal(t, common.HexToAddress("0xf508fCD89b8bd15579dc79A6827cB4686A3592c8"), sync.tokens["vETH"].Address)
