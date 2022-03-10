@@ -973,11 +973,9 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 	}
 
 	mintedVAIS := decimal.NewFromBigInt(bigMintedVAIS, 0)
-	//mintVAISFloatExp := big.NewFloat(0).SetInt(mintVAIS)
-	//mintVAISFloat := big.NewFloat(0).Quo(mintVAISFloatExp, ExpScaleFloat)
 	markets, err := comptroller.GetAssetsIn(nil, account)
-	if err != nil {
-		logger.Printf("syncOneAccount, fail to get GetAssetsIn, err:%v\n", err)
+	if err != nil || len(markets) == 0 {
+		logger.Printf("syncOneAccount, fail to get GetAssetsIn or account is not in any markets, err:%v\n", err)
 		return err
 	}
 
@@ -986,13 +984,8 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 	var fakedFeedPrice *FeededPrice
 	for _, market := range markets {
 		errCode, bigBalance, bigBorrow, bigExchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
-		if err != nil {
-			logger.Printf("syncOneAccount, fail to get GetAccountSnapshot, err:%v\n", err)
-			return err
-		}
-
-		if errCode.Cmp(BigZero) != 0 {
-			logger.Printf("syncOneAccount, fail to get GetAccountSnapshot, errCode:%v\n", errCode)
+		if err != nil || errCode.Cmp(BigZero) != 0 {
+			logger.Printf("syncOneAccount, fail to get GetAccountSnapshot, err:%v, errCode:%v\n", err, errCode)
 			return err
 		}
 
@@ -1011,13 +1004,6 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 				Height: tokens[symbol].FeedPriceUpdateHeihgt,
 			}
 		}
-
-		////apply feeded prices if exist
-		//if symbols[feededPrice.Address] == symbol {
-		//	price = feededPrice.Price
-		//} else if strings.Contains(symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
-		//	price = feededPrice.Price
-		//}
 
 		exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
 		balance := decimal.NewFromBigInt(bigBalance, 0)
@@ -1071,24 +1057,26 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 		Height:        currentHeight,
 		Assets:        assets,
 	}
-
-	//logger.Printf("syncOneAccount,account:%v, height:%v,totalCollateral:%v, totalLoan:%v,info:%+v\n", account, currentHeight, totalCollateral, totalLoan, info.toReadable())
-	if healthFactor.Cmp(Decimal1P1) == -1 {
-		cinfo := &ConcernedAccountInfo{
-			AccInfo: info,
-		}
-		s.concernedAccountInfoCh <- cinfo
-	}
 	s.updateDB(account, info)
-
-	errCode, _, shortfall, err := comptroller.GetAccountLiquidity(nil, account)
-	if err == nil && errCode.Cmp(BigZero) == 0 && shortfall.Cmp(BigZero) == 1 {
-		liquidation := &Liquidation{
-			FeededPrice: fakedFeedPrice,
-			AccInfo:     info,
+	if maxLoanValue.Cmp(MaxLoanValueThreshold) == 1 {
+		errCode, _, shortfall, err := comptroller.GetAccountLiquidity(nil, account)
+		if err == nil && errCode.Cmp(BigZero) == 0 && shortfall.Cmp(BigZero) == 1 {
+			liquidation := &Liquidation{
+				FeededPrice: fakedFeedPrice,
+				AccInfo:     info,
+			}
+			s.liquidationCh <- liquidation
 		}
-		s.liquidationCh <- liquidation
+
+		//logger.Printf("syncOneAccount,account:%v, height:%v,totalCollateral:%v, totalLoan:%v,info:%+v\n", account, currentHeight, totalCollateral, totalLoan, info.toReadable())
+		if healthFactor.Cmp(Decimal1P1) == -1 {
+			cinfo := &ConcernedAccountInfo{
+				AccInfo: info,
+			}
+			s.concernedAccountInfoCh <- cinfo
+		}
 	}
+
 	return nil
 }
 

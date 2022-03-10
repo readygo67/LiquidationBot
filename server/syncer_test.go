@@ -3,12 +3,10 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/readygo67/LiquidationBot/config"
 	dbm "github.com/readygo67/LiquidationBot/db"
 	"github.com/readygo67/LiquidationBot/venus"
@@ -18,11 +16,9 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"math/big"
 	"os"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
-	"unsafe"
 )
 
 var syncer *Syncer
@@ -2097,62 +2093,61 @@ func TestGetOracle(t *testing.T) {
 		finalOracle, _ := priceFeed.Aggregator(nil)
 		println(token, strings.ToLower(finalOracle.String()))
 	}
-
 }
 
-func TestMonitorTxPoolLoop(t *testing.T) {
-	rpcURL := "ws://192.168.88.144:28546"
-	client, _ := ethclient.Dial(rpcURL)
-	fmt.Println("We have a connection")
-	v := reflect.ValueOf(client).Elem()
-	f := v.FieldByName("c")
-	rf := reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem()
-	concrete_client, _ := rf.Interface().(*rpc.Client)
-	txPoolTXs := make(chan common.Hash, 1024)
-	concrete_client.EthSubscribe(
-		context.Background(), txPoolTXs, "newPendingTransactions",
-	)
-	targetMap := make(map[string]struct{}, 24)
-	targetMap["0x137924d7c36816e0dcaf016eb617cc2c92c05782"] = struct{}{} //BNB
-	targetMap["0x178ba789e24a1d51e9ea3cb1db3b52917963d71d"] = struct{}{} //BTCB
-	targetMap["0xfc3069296a691250ffdf21fe51340fdd415a76ed"] = struct{}{} //ETH
-	targetMap["0x7935a51addab8550d346feef34e02f67c9330109"] = struct{}{} //CAKE
-	aggregatorABI, _ := venus.AggregatorMetaData.GetAbi()
-	for txn := range txPoolTXs {
-
-		txn, is_pending, err := client.TransactionByHash(context.Background(), txn)
-		if err == nil && txn != nil && txn.To() != nil && is_pending == true {
-
-			_, ok := targetMap[strings.ToLower(txn.To().String())]
-			if ok {
-
-				if len(txn.Data()) < 5 {
-					//Error
-				}
-				method, err := aggregatorABI.MethodById(txn.Data()[0:4])
-				if err != nil {
-					//Error
-				}
-				if method.Name == "transmit" {
-					inputData := make(map[string]interface{})
-					err = method.Inputs.UnpackIntoMap(inputData, txn.Data()[4:])
-					data := inputData["_report"].([]byte)
-					numbering := data[32+32+32+32:]
-					numberingmid := numbering[len(numbering)/2 : len(numbering)/2+32]
-
-					if err != nil {
-						panic(err)
-					}
-					fmt.Println("==================")
-					fmt.Println(txn.Hash().String(), "is updateing price @", time.Now())
-					logger.Printf("% s % x \n", txn.Hash().String(), numberingmid)
-					result := big.NewInt(0).SetBytes(numberingmid)
-					fmt.Println(txn.Hash().String(), "price: ", result)
-				}
-			}
-		}
-	}
-}
+//func TestMonitorTxPoolLoop(t *testing.T) {
+//	rpcURL := "ws://192.168.88.144:28546"
+//	client, _ := ethclient.Dial(rpcURL)
+//	fmt.Println("We have a connection")
+//	v := reflect.ValueOf(client).Elem()
+//	f := v.FieldByName("c")
+//	rf := reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem()
+//	concrete_client, _ := rf.Interface().(*rpc.Client)
+//	txPoolTXs := make(chan common.Hash, 1024)
+//	concrete_client.EthSubscribe(
+//		context.Background(), txPoolTXs, "newPendingTransactions",
+//	)
+//	targetMap := make(map[string]struct{}, 24)
+//	targetMap["0x137924d7c36816e0dcaf016eb617cc2c92c05782"] = struct{}{} //BNB
+//	targetMap["0x178ba789e24a1d51e9ea3cb1db3b52917963d71d"] = struct{}{} //BTCB
+//	targetMap["0xfc3069296a691250ffdf21fe51340fdd415a76ed"] = struct{}{} //ETH
+//	targetMap["0x7935a51addab8550d346feef34e02f67c9330109"] = struct{}{} //CAKE
+//	aggregatorABI, _ := venus.AggregatorMetaData.GetAbi()
+//	for txn := range txPoolTXs {
+//
+//		txn, is_pending, err := client.TransactionByHash(context.Background(), txn)
+//		if err == nil && txn != nil && txn.To() != nil && is_pending == true {
+//
+//			_, ok := targetMap[strings.ToLower(txn.To().String())]
+//			if ok {
+//
+//				if len(txn.Data()) < 5 {
+//					//Error
+//				}
+//				method, err := aggregatorABI.MethodById(txn.Data()[0:4])
+//				if err != nil {
+//					//Error
+//				}
+//				if method.Name == "transmit" {
+//					inputData := make(map[string]interface{})
+//					err = method.Inputs.UnpackIntoMap(inputData, txn.Data()[4:])
+//					data := inputData["_report"].([]byte)
+//					numbering := data[32+32+32+32:]
+//					numberingmid := numbering[len(numbering)/2 : len(numbering)/2+32]
+//
+//					if err != nil {
+//						panic(err)
+//					}
+//					fmt.Println("==================")
+//					fmt.Println(txn.Hash().String(), "is updateing price @", time.Now())
+//					logger.Printf("% s % x \n", txn.Hash().String(), numberingmid)
+//					result := big.NewInt(0).SetBytes(numberingmid)
+//					fmt.Println(txn.Hash().String(), "price: ", result)
+//				}
+//			}
+//		}
+//	}
+//}
 
 func TestMonitorTransmitEvent(t *testing.T) {
 	ctx := context.Background()
