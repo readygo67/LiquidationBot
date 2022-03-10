@@ -36,11 +36,14 @@ const (
 	SyncIntervalBelow1P5                 = 360
 	SyncIntervalBelow2P0                 = 720
 	SyncIntervalAbove2P0                 = 1800
-	SyncIntervalBackGround               = 900
+	SyncIntervalBackGround               = 600
 	SyncIntervalForMarkets               = 6
 	MonitorLiquidationInterval           = 120
 	ForbiddenPeriodForBadLiquidation     = 200 //200 block
 	ForbiddenPeriodForPendingLiquidation = 200
+	FeedPriceUpdateInterval              = 2 //
+	ProfitSymbol                         = "vBUSD"
+	GasSymbol                            = "vBNB"
 )
 
 type TokenInfo struct {
@@ -50,20 +53,12 @@ type TokenInfo struct {
 	CollateralFactor      decimal.Decimal
 	Price                 decimal.Decimal
 	PriceUpdateHeight     uint64
-	FeedPrice             decimal.Decimal
+	FeededPrice           decimal.Decimal
 	FeedPriceUpdateHeihgt uint64
 	Oracle                common.Address
 }
 
 type Asset struct {
-	Symbol       string
-	Balance      decimal.Decimal //vTokenAmount
-	Loan         decimal.Decimal //underlyingTokenAmount
-	BalanceValue decimal.Decimal //BalanceValue in 10^-18 USDT
-	LoanValue    decimal.Decimal //BalanceValue in 10^-18 USDT
-}
-
-type AssetWithPrice struct {
 	Symbol           string
 	Balance          decimal.Decimal
 	Loan             decimal.Decimal
@@ -76,54 +71,37 @@ type AssetWithPrice struct {
 }
 
 type AccountInfo struct {
-	HealthFactor decimal.Decimal
-	MaxLoanValue decimal.Decimal
-	Assets       []Asset
-}
-
-type ReadableAccountInfo struct {
-	HealthFactor decimal.Decimal
-	MaxLoanValue decimal.Decimal
-	Assets       []Asset
+	Account       common.Address
+	HealthFactor  decimal.Decimal
+	MaxLoanSymbol string
+	MaxLoanValue  decimal.Decimal
+	MintedVAIS    decimal.Decimal
+	Height        uint64
+	Assets        []Asset
 }
 
 type FeededPrice struct {
-	Symbol  string
-	Address common.Address
-	Price   decimal.Decimal
-	Hash    common.Hash
+	Symbol   string
+	Address  common.Address
+	Price    decimal.Decimal
+	GasPrice decimal.Decimal
+	Hash     common.Hash
+	Height   uint64
 }
 
-type FeededPrices struct {
-	Prices []FeededPrice
-	Height uint64
-}
-
-type AccountsWithFeedPrices struct {
-	Addresses    []common.Address
-	FeededPrices *FeededPrices
+type AccountsWithFeededPrice struct {
+	Addresses   []common.Address
+	FeededPrice *FeededPrice
 }
 
 type Liquidation struct {
-	Address      common.Address
-	HealthFactor decimal.Decimal
-	BlockNumber  uint64
-	Endtime      time.Time
-	FeedPrices   FeededPrices
+	AccInfo     AccountInfo
+	FeededPrice *FeededPrice
 }
 
 type ConcernedAccountInfo struct {
-	Address      common.Address
-	FeededPrices FeededPrices
-	BlockNumber  uint64
-	Info         AccountInfo
-}
-
-type ReadableConcernedAccountInfo struct {
-	Address      common.Address
-	FeededPrices FeededPrices
-	BlockNumber  uint64
-	Info         ReadableAccountInfo
+	AccInfo     AccountInfo
+	FeededPrice FeededPrice
 }
 
 type semaphore chan struct{}
@@ -132,6 +110,7 @@ var (
 	EXPSACLE              = decimal.New(1, 18)
 	ExpScaleFloat, _      = big.NewFloat(0).SetString("1000000000000000000")
 	BigZero               = big.NewInt(0)
+	DecimalMax            = decimal.New(1, 128) // solidity's 2^256 = 4^128 < decimal's 10^128
 	Decimal1P0, _         = decimal.NewFromString("1.0")
 	Decimal1P1, _         = decimal.NewFromString("1.1")
 	Decimal1P5, _         = decimal.NewFromString("1.5")
@@ -158,19 +137,20 @@ type Syncer struct {
 	symbols                   map[common.Address]string
 	tokens                    map[string]*TokenInfo
 	flashLoanPools            map[string][]common.Address
+	paths                     map[string][][]common.Address //"srcSymbol:dstSymbol"
 	vbep20s                   map[common.Address]*venus.Vbep20
 	liquidator                *venus.IQingsuan
 	PrivateKey                *ecdsa.PrivateKey
 	m                         sync.Mutex
 	wg                        sync.WaitGroup
 	quitCh                    chan struct{}
-	feededPricesCh            chan *FeededPrices
+	feededPriceCh             chan *FeededPrice
 	liquidationCh             chan *Liquidation
 	priortyLiquidationCh      chan *Liquidation
 	concernedAccountInfoCh    chan *ConcernedAccountInfo
 	backgroundAccountSyncCh   chan common.Address
-	lowPriorityAccountSyncCh  chan *AccountsWithFeedPrices
-	highPriorityAccountSyncCh chan *AccountsWithFeedPrices
+	lowPriorityAccountSyncCh  chan *AccountsWithFeededPrice
+	highPriorityAccountSyncCh chan *AccountsWithFeededPrice
 }
 
 func init() {
@@ -191,10 +171,7 @@ func NewSyncer(
 	oracleAddress string,
 	pancakeRouterAddress string,
 	liquidatorAddress string,
-	privatekey string,
-	feededPricesCh chan *FeededPrices,
-	liquidationCh chan *Liquidation,
-	priorityLiquationCh chan *Liquidation) *Syncer {
+	privatekey string) *Syncer {
 
 	exist, err := db.Has(dbm.BorrowerNumberKey(), nil)
 	if !exist {
@@ -332,12 +309,18 @@ func NewSyncer(
 				}
 			}
 
+			height, err := c.BlockNumber(context.Background())
+			if err != nil {
+				panic(err)
+			}
+
 			token := &TokenInfo{
 				Address:            market,
 				UnderlyingAddress:  underlyingAddress,
 				UnderlyingDecimals: underlyingDecimals,
 				CollateralFactor:   collaterFactor,
 				Price:              price,
+				PriceUpdateHeight:  height,
 				Oracle:             finalOracle,
 			}
 
@@ -351,18 +334,17 @@ func NewSyncer(
 	}
 	wg.Wait()
 
-	flashLoanPool := make(map[string][]common.Address)
-	for symbol1, token1 := range tokens {
-		pairs := make([]common.Address, 0)
-		for _, symbol2 := range []string{"vBNB", "vBUSD", "vUSDT", "vETH", "vCAKE"} {
-			pair, err := pancakeFactory.GetPair(nil, token1.UnderlyingAddress, tokens[symbol2].UnderlyingAddress)
-			if err != nil {
-				continue
-			}
-			pairs = append(pairs, pair)
-		}
-		flashLoanPool[symbol1] = pairs
+	tokens["VAI"] = &TokenInfo{
+		Address:            VAIControllerAddress,
+		UnderlyingAddress:  VAIAddress,
+		UnderlyingDecimals: 18,
+		CollateralFactor:   decimal.Zero,
+		Price:              decimal.New(1, 18),
+		Oracle:             common.Address{},
 	}
+
+	flashLoanPool := buildFlashLoanPool(pancakeFactory, c, tokens)
+	paths := buildPaths(pancakeRouter, tokens)
 
 	return &Syncer{
 		c:                         c,
@@ -374,19 +356,20 @@ func NewSyncer(
 		closeFactor:               closeFactor,
 		tokens:                    tokens,
 		flashLoanPools:            flashLoanPool,
+		paths:                     paths,
 		symbols:                   symbols,
 		vbep20s:                   vbep20s,
 		liquidator:                liquidator,
 		PrivateKey:                privateKey,
 		m:                         m,
 		quitCh:                    make(chan struct{}),
-		feededPricesCh:            feededPricesCh,
-		liquidationCh:             liquidationCh,
-		priortyLiquidationCh:      priorityLiquationCh,
+		feededPriceCh:             make(chan *FeededPrice, 64),
+		liquidationCh:             make(chan *Liquidation, 1024),
+		priortyLiquidationCh:      make(chan *Liquidation, 1024),
 		concernedAccountInfoCh:    make(chan *ConcernedAccountInfo, 4096),
 		backgroundAccountSyncCh:   make(chan common.Address, 8192),
-		lowPriorityAccountSyncCh:  make(chan *AccountsWithFeedPrices, 8192),
-		highPriorityAccountSyncCh: make(chan *AccountsWithFeedPrices, 248),
+		lowPriorityAccountSyncCh:  make(chan *AccountsWithFeededPrice, 1024),
+		highPriorityAccountSyncCh: make(chan *AccountsWithFeededPrice, 248),
 	}
 }
 
@@ -396,7 +379,7 @@ func (s *Syncer) Start() {
 
 	s.wg.Add(9)
 	go s.SyncMarketsAndPricesLoop()
-	go s.ProcessFeededPricesLoop()
+	go s.ProcessFeededPriceLoop()
 	go s.SearchNewBorrowerLoop()
 	go s.BackgroundSyncLoop()
 	go s.syncAccountLoop()
@@ -445,134 +428,117 @@ func (s *Syncer) doSyncMarketsAndPrices() {
 		return
 	}
 	s.closeFactor = decimal.NewFromBigInt(bigCloseFactor, 0)
-
-	var wg sync.WaitGroup
-	wg.Add(len(markets))
-
-	sem := make(semaphore, runtime.NumCPU())
 	for _, market_ := range markets {
 		market := market_
-		sem.Acquire()
-		go func() {
-			defer sem.Release()
-			defer wg.Done()
-			vbep20, err := venus.NewVbep20(market, c)
-			if err != nil {
-				return
-			}
-			symbol, err := vbep20.Symbol(nil)
-			if err != nil {
-				return
-			}
+		vbep20, err := venus.NewVbep20(market, c)
+		if err != nil {
+			continue
+		}
+		symbol, err := vbep20.Symbol(nil)
+		if err != nil {
+			continue
+		}
 
-			marketDetail, err := comptroller.Markets(nil, market)
-			if err != nil {
-				return
-			}
+		marketDetail, err := comptroller.Markets(nil, market)
+		if err != nil {
+			continue
+		}
 
-			bigPrice, err := oracle.GetUnderlyingPrice(nil, market)
-			if err != nil {
-				bigPrice = big.NewInt(0)
-			}
+		bigPrice, err := oracle.GetUnderlyingPrice(nil, market)
+		if err != nil {
+			bigPrice = big.NewInt(0)
+		}
 
-			height, err := s.c.BlockNumber(context.Background())
-			if err != nil {
-				return
-			}
-
-			s.m.Lock()
-			defer s.m.Unlock()
-			if s.tokens[symbol] != nil {
-				s.tokens[symbol].CollateralFactor = decimal.NewFromBigInt(marketDetail.CollateralFactorMantissa, 0)
-				s.tokens[symbol].Price = decimal.NewFromBigInt(bigPrice, 0)
-				s.tokens[symbol].PriceUpdateHeight = height
-			} else {
-				logger.Printf("a new symbol:%v added, please restart venusd\n", symbol)
-			}
-
-		}()
+		height, err := s.c.BlockNumber(context.Background())
+		if err != nil {
+			continue
+		}
+		s.m.Lock()
+		if s.tokens[symbol] != nil {
+			s.tokens[symbol].CollateralFactor = decimal.NewFromBigInt(marketDetail.CollateralFactorMantissa, 0)
+			s.tokens[symbol].Price = decimal.NewFromBigInt(bigPrice, 0)
+			s.tokens[symbol].PriceUpdateHeight = height
+		} else {
+			logger.Printf("a new symbol:%v added, please restart venusd\n", symbol)
+		}
+		s.m.Unlock()
 	}
-	wg.Wait()
 }
 
-func (s *Syncer) ProcessFeededPricesLoop() {
+func (s *Syncer) ProcessFeededPriceLoop() {
 	defer s.wg.Done()
 	for {
 		select {
 		case <-s.quitCh:
 			return
-		case feededPrices := <-s.feededPricesCh:
-			s.processFeededPrices(feededPrices)
+		case feededPrice := <-s.feededPriceCh:
+			s.processFeededPrice(feededPrice)
 		}
 	}
 }
 
-func (s *Syncer) processFeededPrices(feededPrices *FeededPrices) {
+func (s *Syncer) processFeededPrice(feededPrice *FeededPrice) {
 	db := s.db
-	var accounts []common.Address
+	var accountsSymbol []common.Address
+	var accountsSymobl2 []common.Address
+	wg := s.wg
 
 	s.m.Lock()
-	tokens := s.tokens
-	symbols := s.symbols
+	tokens := copyTokens(s.tokens)
 	s.m.Unlock()
 
-	for _, feededPrice := range feededPrices.Prices {
-		symbol := symbols[feededPrice.Address]
-		price := tokens[symbol].Price
-		priceDeltaRatio := price.Sub(feededPrice.Price).Abs().Div(price)
-		if priceDeltaRatio.Cmp(decimal.New(5, -2)) == 1 {
-			logger.Printf("processFeededPrices, sybmol:%v，feedPrices %v, originalPrices:%v, vibration %v exceeds 5 percent, height%v\n", symbol, feededPrice.Price, price, priceDeltaRatio, feededPrices.Height)
-			return
-		}
-
-		symbol2 := ""
-		if symbol == "vBETH" {
-			symbol2 = "vETH"
-		}
-		if symbol == "vETH" {
-			symbol2 = "vBETH"
-		}
-
-		s.m.Lock()
-		s.tokens[symbol].FeedPrice = feededPrice.Price
-		s.tokens[symbol].FeedPriceUpdateHeihgt = feededPrices.Height
-
-		if symbol2 != "" {
-			s.tokens[symbol2].FeedPrice = feededPrice.Price
-			s.tokens[symbol2].FeedPriceUpdateHeihgt = feededPrices.Height
-		}
-		s.m.Unlock()
+	symbol := feededPrice.Symbol
+	price := tokens[symbol].Price
+	priceDeltaRatio := price.Sub(feededPrice.Price).Abs().Div(price)
+	if priceDeltaRatio.Cmp(decimal.New(10, -2)) == 1 {
+		logger.Printf("processFeededPrices, sybmol:%v，feedPrices %v, originalPrices:%v, vibration %v exceeds 5 percent, height%v\n", symbol, feededPrice.Price, price, priceDeltaRatio, feededPrice.Height)
+		return
 	}
 
-	for _, feededPrice := range feededPrices.Prices {
-		symbol := symbols[feededPrice.Address]
-		symbol2 := ""
+	symbol2 := ""
+	if symbol == "vBETH" {
+		symbol2 = "vETH"
+	}
+	if symbol == "vETH" {
+		symbol2 = "vBETH"
+	}
 
-		if symbol == "vBETH" {
-			symbol2 = "vETH"
-		}
-		if symbol == "vETH" {
-			symbol2 = "vBETH"
-		}
+	s.m.Lock()
+	s.tokens[symbol].FeededPrice = feededPrice.Price
+	s.tokens[symbol].FeedPriceUpdateHeihgt = feededPrice.Height
 
+	if symbol2 != "" {
+		s.tokens[symbol2].FeededPrice = feededPrice.Price
+		s.tokens[symbol2].FeedPriceUpdateHeihgt = feededPrice.Height
+	}
+	s.m.Unlock()
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
 		prefix := append(dbm.MarketPrefix, []byte(symbol)...)
 		iter := db.NewIterator(util.BytesPrefix(prefix), nil)
+		defer iter.Release()
 		for iter.Next() {
 			account := common.BytesToAddress(iter.Value())
-			accounts = append(accounts, account)
+			accountsSymbol = append(accountsSymbol, account)
 		}
+	}()
 
+	go func() {
+		defer wg.Done()
 		if symbol2 != "" {
 			prefix2 := append(dbm.MarketPrefix, []byte(symbol2)...)
-			iter = db.NewIterator(util.BytesPrefix(prefix2), nil)
+			iter := db.NewIterator(util.BytesPrefix(prefix2), nil)
+			defer iter.Release()
 			for iter.Next() {
 				account := common.BytesToAddress(iter.Value())
-				accounts = append(accounts, account)
+				accountsSymobl2 = append(accountsSymobl2, account)
 			}
 		}
-		iter.Release()
-		//logger.Printf("processFeededPrices, symbol:%v, feededPrice:%v, accounts:%v\n", symbol, feededPrice, accounts)
-	}
+	}()
+	wg.Wait()
+	accountsSymbol = append(accountsSymbol, accountsSymobl2...)
 
 	priorityAccountMap := make(map[common.Address]bool)
 	iter := db.NewIterator(util.BytesPrefix(dbm.LiquidationBelow1P1Prefix), nil)
@@ -590,8 +556,7 @@ func (s *Syncer) processFeededPrices(feededPrices *FeededPrices) {
 
 	var highPriorityAccounts []common.Address
 	var lowPriorityAccounts []common.Address
-
-	for _, account := range accounts {
+	for _, account := range accountsSymbol {
 		if priorityAccountMap[account] {
 			highPriorityAccounts = append(highPriorityAccounts, account)
 		} else {
@@ -599,21 +564,46 @@ func (s *Syncer) processFeededPrices(feededPrices *FeededPrices) {
 		}
 	}
 
-	//send highPriorityAccount as a batch
-	if len(highPriorityAccounts) != 0 {
-		s.highPriorityAccountSyncCh <- &AccountsWithFeedPrices{
-			Addresses:    highPriorityAccounts,
-			FeededPrices: feededPrices,
+	//sort accounts according ascending healthfactor
+	healthFactors := make([]decimal.Decimal, 0)
+	finalHighPriorityAccounts := make([]common.Address, 0)
+	errorHighPriorityAccounts := make([]common.Address, 0)
+	for _, account := range highPriorityAccounts {
+		bz, err := db.Get(dbm.AccountStoreKey(account.Bytes()), nil)
+		if err != nil {
+			errorHighPriorityAccounts = append(errorHighPriorityAccounts, account)
+		}
+		var info AccountInfo
+		err = json.Unmarshal(bz, &info)
+		if err != nil {
+			errorHighPriorityAccounts = append(errorHighPriorityAccounts, account)
+		} else {
+			healthFactors = append(healthFactors, info.HealthFactor)
+			finalHighPriorityAccounts = append(finalHighPriorityAccounts, account)
 		}
 	}
 
-	//send lowPriorityAccount one by one
-	//for _, account := range lowPriorityAccounts {
-	//	s.lowPriorityAccountSyncCh <- &AccountsWithFeedPrices{
-	//		Addresses:    []common.Address{account},
-	//		FeededPrices: feededPrices,
-	//	}
-	//}
+	for i := 0; i < len(finalHighPriorityAccounts)-1; i++ {
+		for j := i + 1; j < len(finalHighPriorityAccounts); j++ {
+			if healthFactors[i].Cmp(healthFactors[j]) == 1 {
+				healthFactors[i], healthFactors[j] = healthFactors[j], healthFactors[j]
+				finalHighPriorityAccounts[i], finalHighPriorityAccounts[j] = finalHighPriorityAccounts[j], finalHighPriorityAccounts[i]
+			}
+		}
+	}
+
+	//send highPriorityAccount as a batch
+	if len(finalHighPriorityAccounts) != 0 {
+		s.highPriorityAccountSyncCh <- &AccountsWithFeededPrice{
+			Addresses:   finalHighPriorityAccounts,
+			FeededPrice: feededPrice,
+		}
+
+		s.highPriorityAccountSyncCh <- &AccountsWithFeededPrice{
+			Addresses:   errorHighPriorityAccounts,
+			FeededPrice: feededPrice,
+		}
+	}
 }
 
 func (s *Syncer) syncAccountLoop() {
@@ -628,33 +618,14 @@ func (s *Syncer) syncAccountLoop() {
 			s.processHighPriorityAccountSync(req)
 
 		case req := <-s.lowPriorityAccountSyncCh:
-
-			//PRIORITY1:
-			//	for {
-			//		select {
-			//		case innerReq := <-s.highPriorityAccountSyncCh:
-			//			s.processHighPriorityAccountSync(innerReq)
-			//		default:
-			//			break PRIORITY1
-			//		}
-			//	}
 			if len(s.highPriorityAccountSyncCh) != 0 {
 				continue
 			}
 			accounts := req.Addresses
-			feededPrices := req.FeededPrices
-			s.syncOneAccountWithFeededPrices(accounts[0], feededPrices)
+			feededPrices := req.FeededPrice
+			s.syncOneAccountWithFeededPrice(accounts[0], feededPrices)
 
 		case account := <-s.backgroundAccountSyncCh:
-			//PRIORITY2:
-			//	for {
-			//		select {
-			//		case innerReq := <-s.highPriorityAccountSyncCh:
-			//			s.processHighPriorityAccountSync(innerReq)
-			//		default:
-			//			break PRIORITY2
-			//		}
-			//	}
 			if len(s.highPriorityAccountSyncCh) != 0 {
 				continue
 			}
@@ -663,9 +634,9 @@ func (s *Syncer) syncAccountLoop() {
 	}
 }
 
-func (s *Syncer) processHighPriorityAccountSync(req *AccountsWithFeedPrices) {
+func (s *Syncer) processHighPriorityAccountSync(req *AccountsWithFeededPrice) {
 	accounts := req.Addresses
-	feededPrices := req.FeededPrices
+	feededPrice := req.FeededPrice
 
 	var wg sync.WaitGroup
 	wg.Add(len(accounts))
@@ -676,7 +647,7 @@ func (s *Syncer) processHighPriorityAccountSync(req *AccountsWithFeedPrices) {
 		go func() {
 			defer sem.Release()
 			defer wg.Done()
-			s.syncOneAccountWithFeededPrices(account, feededPrices)
+			s.syncOneAccountWithFeededPrice(account, feededPrice)
 		}()
 	}
 	wg.Wait()
@@ -896,7 +867,7 @@ func (s *Syncer) MonitorTxPoolLoop() {
 			OracleToVTokenMap[token.Oracle] = token.Address
 		}
 	}
-	logger.Printf("MonitorTxPoolLoop running....\n")
+
 	for {
 		select {
 		case <-s.quitCh:
@@ -926,24 +897,24 @@ func (s *Syncer) MonitorTxPoolLoop() {
 
 					data := inputData["_report"].([]byte)
 					numbering := data[32+32+32+32:]
-					numberingmid := numbering[len(numbering)/2 : len(numbering)/2+32]
+					midpos := len(numbering) / 32 / 2
+					numberingmid := numbering[midpos*32 : midpos*32+32]
 					bigFeededPrice := big.NewInt(0).SetBytes(numberingmid)
 
 					symobl := symbols[vTokenAddress]
 					decimalDelta := 10 + 18 - tokens[symobl].UnderlyingDecimals //VenusChainlinkOracle.sol line46
 
-					feededPrice := FeededPrice{
-						Symbol:  symobl,
-						Address: vTokenAddress,
-						Price:   decimal.NewFromBigInt(bigFeededPrice, int32(decimalDelta)),
-						Hash:    txHash,
+					feededPrice := &FeededPrice{
+						Symbol:   symobl,
+						Address:  vTokenAddress,
+						Price:    decimal.NewFromBigInt(bigFeededPrice, int32(decimalDelta)),
+						Hash:     txHash,
+						GasPrice: decimal.NewFromBigInt(txn.GasPrice(), 0),
+						Height:   height,
 					}
 
 					logger.Printf("catch feedPrice, height:%v, symbol:%v, price:%+v\n", height, symobl, feededPrice)
-					s.feededPricesCh <- &FeededPrices{
-						Prices: []FeededPrice{feededPrice},
-						Height: height,
-					}
+					s.feededPriceCh <- feededPrice
 				}
 			}
 		}
@@ -982,7 +953,7 @@ func (s *Syncer) syncAccounts(accounts []common.Address) {
 }
 
 func (s *Syncer) syncOneAccount(account common.Address) error {
-	ctx := context.Background()
+	//ctx := context.Background()
 	comptroller := s.comptroller
 
 	s.m.Lock()
@@ -1002,24 +973,19 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 	}
 
 	mintedVAIS := decimal.NewFromBigInt(bigMintedVAIS, 0)
-	//mintVAISFloatExp := big.NewFloat(0).SetInt(mintVAIS)
-	//mintVAISFloat := big.NewFloat(0).Quo(mintVAISFloatExp, ExpScaleFloat)
 	markets, err := comptroller.GetAssetsIn(nil, account)
-	if err != nil {
-		logger.Printf("syncOneAccount, fail to get GetAssetsIn, err:%v\n", err)
+	if err != nil || len(markets) == 0 {
+		logger.Printf("syncOneAccount, fail to get GetAssetsIn or account is not in any markets, err:%v\n", err)
 		return err
 	}
 
 	maxLoanValue := decimal.NewFromInt(0)
+	maxLoanSymbol := ""
+	var fakedFeedPrice *FeededPrice
 	for _, market := range markets {
 		errCode, bigBalance, bigBorrow, bigExchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
-		if err != nil {
-			logger.Printf("syncOneAccount, fail to get GetAccountSnapshot, err:%v\n", err)
-			return err
-		}
-
-		if errCode.Cmp(BigZero) != 0 {
-			logger.Printf("syncOneAccount, fail to get GetAccountSnapshot, errCode:%v\n", errCode)
+		if err != nil || errCode.Cmp(BigZero) != 0 {
+			logger.Printf("syncOneAccount, fail to get GetAccountSnapshot, err:%v, errCode:%v\n", err, errCode)
 			return err
 		}
 
@@ -1030,6 +996,14 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 		symbol := symbols[market]
 		collateralFactor := tokens[symbol].CollateralFactor
 		price := tokens[symbol].Price
+		if tokens[symbol].FeedPriceUpdateHeihgt+FeedPriceUpdateInterval > tokens[symbol].PriceUpdateHeight {
+			price = tokens[symbol].FeededPrice
+			fakedFeedPrice = &FeededPrice{
+				Symbol: symbol,
+				Price:  price,
+				Height: tokens[symbol].FeedPriceUpdateHeihgt,
+			}
+		}
 
 		exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
 		balance := decimal.NewFromBigInt(bigBalance, 0)
@@ -1043,19 +1017,23 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 		loan := borrow.Mul(price).Div(EXPSACLE)
 		totalLoan = totalLoan.Add(loan.Truncate(0))
 
-		//build account table
 		asset := Asset{
-			Symbol:       symbol,
-			Balance:      balance,
-			Loan:         borrow,
-			BalanceValue: balanceValue,
-			LoanValue:    loan,
+			Symbol:           symbol,
+			Balance:          balance,
+			Loan:             borrow,
+			CollateralFactor: collateralFactor,
+			BalanceValue:     balanceValue,
+			CollateralValue:  collateral,
+			LoanValue:        loan,
+			Price:            price,
+			ExchangeRate:     exchangeRate,
 		}
 
 		//logger.Printf("syncOneAccount, symbol:%v, price:%v, exchangeRate:%v, asset:%+v\n", symbol, price, bigExchangeRate, asset)
 		assets = append(assets, asset)
 		if loan.Cmp(maxLoanValue) == 1 {
 			maxLoanValue = loan
+			maxLoanSymbol = symbol
 		}
 	}
 
@@ -1067,47 +1045,49 @@ func (s *Syncer) syncOneAccount(account common.Address) error {
 
 	if mintedVAIS.Cmp(maxLoanValue) == 1 {
 		maxLoanValue = mintedVAIS
-	}
-
-	info := AccountInfo{
-		HealthFactor: healthFactor,
-		MaxLoanValue: maxLoanValue,
-		Assets:       assets,
+		maxLoanSymbol = "VAI"
 	}
 	currentHeight, _ := s.c.BlockNumber(context.Background())
-	//logger.Printf("syncOneAccount,account:%v, height:%v,totalCollateral:%v, totalLoan:%v,info:%+v\n", account, currentHeight, totalCollateral, totalLoan, info.toReadable())
-	if healthFactor.Cmp(Decimal1P1) == -1 {
-		cinfo := &ConcernedAccountInfo{
-			Address:     account,
-			BlockNumber: currentHeight,
-			Info:        info,
-		}
-		s.concernedAccountInfoCh <- cinfo
+	info := AccountInfo{
+		Account:       account,
+		HealthFactor:  healthFactor,
+		MaxLoanValue:  maxLoanValue,
+		MaxLoanSymbol: maxLoanSymbol,
+		MintedVAIS:    mintedVAIS,
+		Height:        currentHeight,
+		Assets:        assets,
 	}
 	s.updateDB(account, info)
-
-	errCode, _, shortfall, err := comptroller.GetAccountLiquidity(nil, account)
-	if err == nil && errCode.Cmp(BigZero) == 0 && shortfall.Cmp(BigZero) == 1 {
-		blockNumber, _ := s.c.BlockNumber(ctx)
-		liquidation := &Liquidation{
-			Address:      account,
-			HealthFactor: healthFactor,
-			BlockNumber:  blockNumber,
+	if maxLoanValue.Cmp(MaxLoanValueThreshold) == 1 {
+		errCode, _, shortfall, err := comptroller.GetAccountLiquidity(nil, account)
+		if err == nil && errCode.Cmp(BigZero) == 0 && shortfall.Cmp(BigZero) == 1 {
+			liquidation := &Liquidation{
+				FeededPrice: fakedFeedPrice,
+				AccInfo:     info,
+			}
+			s.liquidationCh <- liquidation
 		}
-		s.liquidationCh <- liquidation
+
+		//logger.Printf("syncOneAccount,account:%v, height:%v,totalCollateral:%v, totalLoan:%v,info:%+v\n", account, currentHeight, totalCollateral, totalLoan, info.toReadable())
+		if healthFactor.Cmp(Decimal1P1) == -1 {
+			cinfo := &ConcernedAccountInfo{
+				AccInfo: info,
+			}
+			s.concernedAccountInfoCh <- cinfo
+		}
 	}
+
 	return nil
 }
 
-func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPrices *FeededPrices) error {
-	ctx := context.Background()
+func (s *Syncer) syncOneAccountWithFeededPrice(account common.Address, feededPrice *FeededPrice) error {
 	comptroller := s.comptroller
 
 	s.m.Lock()
 	symbols := copySymbols(s.symbols)
 	tokens := copyTokens(s.tokens)
-	vbep20s := s.vbep20s
 	s.m.Unlock()
+	vbep20s := s.vbep20s
 
 	totalCollateral := decimal.NewFromInt(0)
 	totalLoan := decimal.NewFromInt(0)
@@ -1126,6 +1106,7 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 	}
 
 	maxLoanValue := decimal.NewFromInt(0)
+	maxLoanSymbol := ""
 	for _, market := range markets {
 		errCode, bigBalance, bigBorrow, bigExchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
 		if err != nil {
@@ -1147,18 +1128,16 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 
 		//use latest price even it is pending
 		price := tokens[symbol].Price
-		if tokens[symbol].FeedPriceUpdateHeihgt > tokens[symbol].PriceUpdateHeight {
-			price = tokens[symbol].FeedPrice
+		if tokens[symbol].FeedPriceUpdateHeihgt+FeedPriceUpdateInterval > tokens[symbol].PriceUpdateHeight {
+			price = tokens[symbol].FeededPrice
 		}
 
 		//apply feeded prices if exist
-		//for _, feededPrice := range feededPrices.Prices {
-		//	if symbols[feededPrice.Address] == symbol {
-		//		price = feededPrice.Price
-		//	} else if strings.Contains(symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
-		//		price = feededPrice.Price
-		//	}
-		//}
+		if symbols[feededPrice.Address] == symbol {
+			price = feededPrice.Price
+		} else if strings.Contains(symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
+			price = feededPrice.Price
+		}
 
 		exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
 		balance := decimal.NewFromBigInt(bigBalance, 0)
@@ -1174,17 +1153,23 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 
 		//build account table
 		asset := Asset{
-			Symbol:       symbol,
-			Balance:      balance,
-			Loan:         borrow,
-			BalanceValue: balanceValue,
-			LoanValue:    loan,
+			Symbol:           symbol,
+			Balance:          balance,
+			Loan:             borrow,
+			CollateralFactor: collateralFactor,
+			BalanceValue:     balanceValue,
+			CollateralValue:  collateral,
+			LoanValue:        loan,
+			Price:            price,
+			ExchangeRate:     exchangeRate,
 		}
+
 		//logger.Printf("syncOneAccountWithFeededPrices, symbol:%v, exchangeRate:%v,price:%v, asset:%+v\n", symbol, exchangeRate, price, asset)
 		assets = append(assets, asset)
 
 		if loan.Cmp(maxLoanValue) == 1 {
 			maxLoanValue = loan
+			maxLoanSymbol = symbol
 		}
 	}
 
@@ -1196,36 +1181,36 @@ func (s *Syncer) syncOneAccountWithFeededPrices(account common.Address, feededPr
 
 	if mintedVAIS.Cmp(maxLoanValue) == 1 {
 		maxLoanValue = mintedVAIS
+		maxLoanSymbol = "VAI"
 	}
 
+	currentHeight, _ := s.c.BlockNumber(context.Background())
 	info := AccountInfo{
-		HealthFactor: healthFactor,
-		MaxLoanValue: maxLoanValue,
-		Assets:       assets,
+		Account:       account,
+		HealthFactor:  healthFactor,
+		MaxLoanValue:  maxLoanValue,
+		MaxLoanSymbol: maxLoanSymbol,
+		MintedVAIS:    mintedVAIS,
+		Height:        currentHeight,
+		Assets:        assets,
 	}
 	s.updateDB(account, info)
 
-	currentHeight, _ := s.c.BlockNumber(context.Background())
 	//logger.Printf("syncOneAccountWithFeededPrices,account:%v, height:%v,  totalCollateral:%v, totalLoan:%v, info:%+v\n", account, currentHeight, totalCollateral, totalLoan, info.toReadable())
-	if healthFactor.Cmp(Decimal1P1) == -1 {
-		cinfo := &ConcernedAccountInfo{
-			Address:      account,
-			FeededPrices: *feededPrices,
-			BlockNumber:  currentHeight,
-			Info:         info,
-		}
-		s.concernedAccountInfoCh <- cinfo
-	}
-
-	if healthFactor.Cmp(decimal.NewFromInt(1)) != 1 {
-		blockNumber, _ := s.c.BlockNumber(ctx)
+	if healthFactor.Cmp(decimal.NewFromInt(1)) == -1 {
 		liquidation := &Liquidation{
-			Address:      account,
-			HealthFactor: healthFactor,
-			BlockNumber:  blockNumber,
-			FeedPrices:   *feededPrices,
+			AccInfo:     info,
+			FeededPrice: feededPrice,
 		}
 		s.priortyLiquidationCh <- liquidation
+	}
+
+	if healthFactor.Cmp(Decimal1P1) == -1 {
+		cinfo := &ConcernedAccountInfo{
+			FeededPrice: *feededPrice,
+			AccInfo:     info,
+		}
+		s.concernedAccountInfoCh <- cinfo
 	}
 	return nil
 }
@@ -1295,27 +1280,28 @@ func (s *Syncer) ProcessLiquidationLoop() {
 
 func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 	comptroller := s.comptroller
-	pancakeRouter := s.pancakeRouter
-	pancakeFactory := s.pancakeFactory
-	account := liquidation.Address
+	//pancakeRouter := s.pancakeRouter
+	//pancakeFactory := s.pancakeFactory
+	accInfo := liquidation.AccInfo
+	account := accInfo.Account
 	db := s.db
-	feededPrices := liquidation.FeedPrices
+	feededPrice := liquidation.FeededPrice
 	withFeedPrice := false
-	if len(feededPrices.Prices) != 0 {
+	if feededPrice != nil {
 		withFeedPrice = true
 	}
 
 	s.m.Lock()
-	symbols := copySymbols(s.symbols)
+	//symbols := copySymbols(s.symbols)
 	tokens := copyTokens(s.tokens)
+	s.m.Unlock()
 	vbep20s := s.vbep20s
 	closeFactor := s.closeFactor
-	s.m.Unlock()
 
 	//current height
 	currentHeight, err := s.c.BlockNumber(context.Background())
 	if err != nil {
-		logger.Printf("processLiquidationReq, fail to get blocknumber,err:%v\n", err)
+		logger.Printf("processLiquidationReq, fail to get blockNumber,err:%v\n", err)
 		return err
 	}
 	callOptions := &bind.CallOpts{
@@ -1333,79 +1319,88 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 		return err
 	}
 
-	totalCollateral := decimal.NewFromInt(0)
-	totalLoan := decimal.NewFromInt(0)
-
-	bigMintedVAIS, err := comptroller.MintedVAIs(nil, account)
-	if err != nil {
-		logger.Printf("processLiquidationReq, fail to get MintedVAIs, account:%v, err:%v\n", account, err)
-		return err
-	}
-	mintedVAIS := decimal.NewFromBigInt(bigMintedVAIS, 0)
-
-	var assets []AssetWithPrice
-	markets, err := comptroller.GetAssetsIn(nil, account)
-	if err != nil {
-		logger.Printf("processLiquidationReq, fail to get GetAssetsIn, account:%v, err:%v\n", account, err)
-		return err
-	}
-
-	for _, market := range markets {
-		errCode, bigBalance, bigBorrow, bigExchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
-		//logger.Printf("bigBalance:%v, bigBorrow:%v, bigExchangeRate:%v\n", bigBalance, bigBorrow, bigExchangeRate)
-		if err != nil {
-			logger.Printf("processLiquidationReq, fail to get GetAccountSnapshot, account:%v, err:%v\n", account, err)
-			return err
-		}
-
-		if errCode.Cmp(BigZero) != 0 {
-			logger.Printf("processLiquidationReq, fail to get GetAccountSnapshot, account:%v, errCode:%v\n", account, errCode)
-			return err
-		}
-
-		if bigBalance.Cmp(BigZero) == 0 && bigBorrow.Cmp(BigZero) == 0 {
-			continue
-		}
-
-		symbol := symbols[market]
-		collateralFactor := tokens[symbol].CollateralFactor
-		price := tokens[symbol].Price
-
-		if tokens[symbol].FeedPriceUpdateHeihgt > tokens[symbol].PriceUpdateHeight {
-			withFeedPrice = true
-			price = tokens[symbol].FeedPrice
-		}
-
-		exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
-		balance := decimal.NewFromBigInt(bigBalance, 0) //vToken Amount
-		borrow := decimal.NewFromBigInt(bigBorrow, 0)
-
-		multiplier := collateralFactor.Mul(exchangeRate).Div(EXPSACLE)
-		multiplier = multiplier.Mul(price).Div(EXPSACLE)
-		collateralD := balance.Mul(multiplier).Div(EXPSACLE)
-		totalCollateral = totalCollateral.Add(collateralD.Truncate(0))
-
-		loan := borrow.Mul(price).Div(EXPSACLE)
-		totalLoan = totalLoan.Add(loan.Truncate(0))
-
-		asset := AssetWithPrice{
-			Symbol:           symbol,
-			Balance:          decimal.NewFromBigInt(bigBalance, 0),
-			Loan:             decimal.NewFromBigInt(bigBorrow, 0),
-			CollateralFactor: collateralFactor.Div(EXPSACLE),
-			BalanceValue:     balance.Mul(exchangeRate).Mul(price).Div(EXPSACLE).Div(EXPSACLE), //collateral value in 10^-18 USDT
-			CollateralValue:  collateralD,                                                      //collateral value considering collateralFactor, = Balance * collateralFactor
-			LoanValue:        loan,                                                             //loan value in 10^-18 USDT
-			Price:            price,
-			ExchangeRate:     exchangeRate,
-		}
-		//logger.Printf("asset:%+v, address:%v\n", asset, tokens[asset.Symbol].Address)
-		assets = append(assets, asset)
-	}
-
-	totalLoan = totalLoan.Add(mintedVAIS)
-	logger.Printf("account:%v, totalCollateralValue:%v, mintedVAISValue:%v, totalLoanValue:%v, calculatedshortfall:%v\n", account, totalCollateral.Div(EXPSACLE), mintedVAIS.Div(EXPSACLE), totalLoan.Div(EXPSACLE), (totalLoan.Sub(totalCollateral)))
-	logger.Printf("account:%v, assets:%v\n", account, assets)
+	//totalCollateral := decimal.NewFromInt(0)
+	//totalLoan := decimal.NewFromInt(0)
+	//
+	//bigMintedVAIS, err := comptroller.MintedVAIs(nil, account)
+	//if err != nil {
+	//	logger.Printf("processLiquidationReq, fail to get MintedVAIs, account:%v, err:%v\n", account, err)
+	//	return err
+	//}
+	//mintedVAIS := decimal.NewFromBigInt(bigMintedVAIS, 0)
+	//
+	//var assets []Asset
+	//markets, err := comptroller.GetAssetsIn(nil, account)
+	//if err != nil {
+	//	logger.Printf("processLiquidationReq, fail to get GetAssetsIn, account:%v, err:%v\n", account, err)
+	//	return err
+	//}
+	//
+	//for _, market := range markets {
+	//	errCode, bigBalance, bigBorrow, bigExchangeRate, err := vbep20s[market].GetAccountSnapshot(nil, account)
+	//	//logger.Printf("bigBalance:%v, bigBorrow:%v, bigExchangeRate:%v\n", bigBalance, bigBorrow, bigExchangeRate)
+	//	if err != nil {
+	//		logger.Printf("processLiquidationReq, fail to get GetAccountSnapshot, account:%v, err:%v\n", account, err)
+	//		return err
+	//	}
+	//
+	//	if errCode.Cmp(BigZero) != 0 {
+	//		logger.Printf("processLiquidationReq, fail to get GetAccountSnapshot, account:%v, errCode:%v\n", account, errCode)
+	//		return err
+	//	}
+	//
+	//	if bigBalance.Cmp(BigZero) == 0 && bigBorrow.Cmp(BigZero) == 0 {
+	//		continue
+	//	}
+	//
+	//	symbol := symbols[market]
+	//	collateralFactor := tokens[symbol].CollateralFactor
+	//	price := tokens[symbol].Price
+	//
+	//	if tokens[symbol].FeedPriceUpdateHeihgt > tokens[symbol].PriceUpdateHeight {
+	//		withFeedPrice = true
+	//		price = tokens[symbol].FeededPrice
+	//	}
+	//
+	//	//apply feeded prices if exist
+	//	if feededPrice != nil {
+	//		if symbols[feededPrice.Address] == symbol {
+	//			price = feededPrice.Price
+	//		} else if strings.Contains(symbols[feededPrice.Address], "ETH") && strings.Contains(symbol, "ETH") {
+	//			price = feededPrice.Price
+	//		}
+	//	}
+	//
+	//	exchangeRate := decimal.NewFromBigInt(bigExchangeRate, 0)
+	//	balance := decimal.NewFromBigInt(bigBalance, 0) //vToken Amount
+	//	borrow := decimal.NewFromBigInt(bigBorrow, 0)
+	//
+	//	multiplier := collateralFactor.Mul(exchangeRate).Div(EXPSACLE)
+	//	multiplier = multiplier.Mul(price).Div(EXPSACLE)
+	//	collateralD := balance.Mul(multiplier).Div(EXPSACLE)
+	//	totalCollateral = totalCollateral.Add(collateralD.Truncate(0))
+	//
+	//	loan := borrow.Mul(price).Div(EXPSACLE)
+	//	totalLoan = totalLoan.Add(loan.Truncate(0))
+	//
+	//	asset := Asset{
+	//		Symbol:           symbol,
+	//		Balance:          decimal.NewFromBigInt(bigBalance, 0),
+	//		Loan:             decimal.NewFromBigInt(bigBorrow, 0),
+	//		CollateralFactor: collateralFactor.Div(EXPSACLE),
+	//		BalanceValue:     balance.Mul(exchangeRate).Mul(price).Div(EXPSACLE).Div(EXPSACLE), //collateral value in 10^-18 USDT
+	//		CollateralValue:  collateralD,                                                      //collateral value considering collateralFactor, = Balance * collateralFactor
+	//		LoanValue:        loan,                                                             //loan value in 10^-18 USDT
+	//		Price:            price,
+	//		ExchangeRate:     exchangeRate,
+	//	}
+	//	//logger.Printf("asset:%+v, address:%v\n", asset, tokens[asset.Symbol].Address)
+	//	assets = append(assets, asset)
+	//}
+	//
+	//totalLoan = totalLoan.Add(mintedVAIS)
+	//logger.Printf("account:%v, totalCollateralValue:%v, mintedVAISValue:%v, totalLoanValue:%v, calculatedshortfall:%v\n", account, totalCollateral.Div(EXPSACLE), mintedVAIS.Div(EXPSACLE), totalLoan.Div(EXPSACLE), (totalLoan.Sub(totalCollateral)))
+	//logger.Printf("account:%v, assets:%v\n", account, assets)
 
 	if !withFeedPrice {
 		errCode, _, shortfall, err := comptroller.GetAccountLiquidity(callOptions, account)
@@ -1421,26 +1416,27 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 	}
 
 	//select the repayed token and seized collateral token
-	maxLoanValue := decimal.NewFromInt(0)
-	maxLoanSymbol := ""
+	maxLoanValue := accInfo.MaxLoanValue
+	maxLoanSymbol := accInfo.MaxLoanSymbol
+
 	//repayIndex := math.MaxInt32
-
-	for _, asset := range assets {
-		if asset.LoanValue.Cmp(maxLoanValue) == 1 {
-			maxLoanValue = asset.LoanValue
-			maxLoanSymbol = asset.Symbol
-			//repayIndex = i
-		}
-	}
-
-	if mintedVAIS.Cmp(maxLoanValue) == 1 {
-		maxLoanValue = mintedVAIS
-		maxLoanSymbol = "VAI"
-	}
+	//for _, asset := range  assets {
+	//	if asset.LoanValue.Cmp(maxLoanValue) == 1 {
+	//		maxLoanValue = asset.LoanValue
+	//		maxLoanSymbol = asset.Symbol
+	//		//repayIndex = i
+	//	}
+	//}
+	//
+	//if mintedVAIS.Cmp(maxLoanValue) == 1 {
+	//	maxLoanValue = mintedVAIS
+	//	maxLoanSymbol = "VAI"
+	//}
 
 	//the closeFactor applies to only single borrowed asset
 	maxRepayValue := maxLoanValue.Mul(closeFactor).Div(EXPSACLE) //closeFactor = 0.8*10^18
 	repaySymbol := maxLoanSymbol
+	assets := accInfo.Assets
 
 	repayValue := decimal.NewFromInt(0)
 	seizedSymbol := ""
@@ -1465,15 +1461,11 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 	var repayAmount decimal.Decimal
 	if repaySymbol == "VAI" {
-		repayAmount = repayValue.Truncate(0).Sub(decimal.NewFromInt(100))
+		repayAmount = repayValue.Truncate(0).Mul(decimal.New(999999, -4)) //to avoid TOO_MUCH_REPAY error
 		errCode, bigSeizedCTokenAmount, err = comptroller.LiquidateVAICalculateSeizeTokens(callOptions, tokens[seizedSymbol].Address, repayAmount.BigInt())
-		if err != nil {
-			logger.Printf("processLiquidationReq, fail to get LiquidateVAICalculateSeizeTokens, account:%v, err:%v\n", account, err)
+		if err != nil || errCode.Cmp(BigZero) != 0 {
+			logger.Printf("processLiquidationReq, fail to get LiquidateVAICalculateSeizeTokens, account:%v, err:%v, errCode:%v\n", account, err, errCode)
 			return err
-		}
-		if errCode.Cmp(BigZero) != 0 {
-			logger.Printf("processLiquidationReq, fail to get LiquidateVAICalculateSeizeTokens, account:%v, errCode:%v\n", account, errCode)
-			return fmt.Errorf("%v", errCode)
 		}
 	} else {
 		bigBorrowBalanceStored, err := vbep20s[tokens[repaySymbol].Address].BorrowBalanceStored(callOptions, account)
@@ -1482,20 +1474,15 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 			logger.Printf("processLiquidationReq, fail to get BorrowBalanceStored, account:%v, err:%v\n", account, err)
 			return err
 		}
-		repayAmount = decimal.NewFromBigInt(bigBorrowBalanceStored, 0).Mul(closeFactor).Div(EXPSACLE) //repayValue.Mul(EXPSACLE).Div(assets[repayIndex].Price)
-		repayAmount = repayAmount.Truncate(0).Sub(decimal.NewFromInt(100))                            //to avoid TOO_MUCH_REPAY error
+		repayAmount = decimal.NewFromBigInt(bigBorrowBalanceStored, 0).Mul(closeFactor).Div(EXPSACLE)
+		repayAmount = repayAmount.Truncate(0).Mul(decimal.New(999999, -4)) //to avoid TOO_MUCH_REPAY error
 
 		errCode, bigSeizedCTokenAmount, err = comptroller.LiquidateCalculateSeizeTokens(callOptions, tokens[repaySymbol].Address, tokens[seizedSymbol].Address, repayAmount.BigInt())
-		if err != nil {
-			logger.Printf("processLiquidationReq, fail to get LiquidateCalculateSeizeTokens, account:%v, err:%v\n", account, err)
+		if err != nil || errCode.Cmp(BigZero) != 0 {
+			logger.Printf("processLiquidationReq, fail to get LiquidateCalculateSeizeTokens, account:%v, err:%v, errCode%v\n", account, err, errCode)
 			return err
 		}
-		if errCode.Cmp(BigZero) != 0 {
-			logger.Printf("processLiquidationReq, fail to get LiquidateCalculateSeizeTokens, account:%v, errCode:%v\n", account, errCode)
-			return fmt.Errorf("%v", errCode)
-		}
 	}
-
 	seizedVTokenAmount := decimal.NewFromBigInt(bigSeizedCTokenAmount, 0)
 	seizedUnderlyingTokenAmount := seizedVTokenAmount.Mul(assets[seizedIndex].ExchangeRate).Div(EXPSACLE)
 	seizedUnderlyingTokenValue := seizedUnderlyingTokenAmount.Mul(assets[seizedIndex].Price).Div(EXPSACLE)
@@ -1507,11 +1494,11 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 		//return err
 	}
 
-	//massProfit := seizedUnderlyingTokenValue.Sub(repayValue)
-	//if massProfit.Cmp(ProfitThreshold) == -1 {
-	//	logger.Printf("processLiquidationReq, profit:%v < 20USDT, omit\n", massProfit.Div(EXPSACLE))
-	//	return nil
-	//}
+	massProfit := seizedUnderlyingTokenValue.Sub(repayValue)
+	if massProfit.Cmp(ProfitThreshold) == -1 {
+		logger.Printf("processLiquidationReq, profit:%v < 5 USDT, omit\n", massProfit.Div(EXPSACLE))
+		return nil
+	}
 
 	flashLoanFeeRatio := decimal.NewFromInt(25).Div(decimal.NewFromInt(9975))
 	flashLoanFeeAmount := repayAmount.Mul(flashLoanFeeRatio).Add(decimal.NewFromInt(1))
@@ -1519,19 +1506,20 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 	bigGasPrice, err := s.c.SuggestGasPrice(context.Background())
 	if err != nil {
-		bigGasPrice = big.NewInt(5)
+		bigGasPrice = big.NewInt(5000000000)
 	}
 
-	var gasPrice decimal.Decimal
+	gasPrice := decimal.NewFromBigInt(bigGasPrice, 0) //x gasPrice for PGA
 	if withFeedPrice {
-		gasPrice = decimal.NewFromBigInt(bigGasPrice, 0) //x gasPrice for PGA
+		if feededPrice.GasPrice.Cmp(decimal.Zero) == 1 {
+			gasPrice = feededPrice.GasPrice //follow feedPrice Tx's gasPrice
+		}
 	} else {
 		gasPrice = decimal.NewFromBigInt(bigGasPrice, 0).Mul(decimal.NewFromFloat32(1.02)) //x1.02 gasPrice for PGA
 	}
 
-	gasLimt := uint64(3000000)
-	bigGas := decimal.NewFromInt(int64(gasLimt))
-	ethPrice := tokens["vBNB"].Price
+	gasLimit := decimal.NewFromInt(int64(3000000))
+	ethPrice := tokens[GasSymbol].Price
 
 	if repaySymbol == "VAI" {
 		addresses := []common.Address{
@@ -1544,22 +1532,27 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 		if isStalbeCoin(seizedSymbol) {
 			//case6, repay VAI and get stablecoin
-			//repay VAI, capture vUSDT, vBUSD, vDAI, swap part vUSDT/vBUSD/vDAI to VAI, flashLoan from VAI-wBNB pair.
-			flashLoanFrom, err := pancakeFactory.GetPair(nil, VAIAddress, tokens["vBNB"].UnderlyingAddress)
+			//repay VAI, capture vUSDT, vBUSD, vDAI, swap part vUSDT/vBUSD/vDAI to VAI.
+			path1, amountIn, err := s.selectPathWithMinAmountIn(seizedSymbol, repaySymbol, flashLoanReturnAmount)
+			if err != nil {
+				logger.Printf("processLiquidationReq case6, fail to get selectPathWithMinAmountIn, account:%v, seizedSymbol:%v, repaySymbol:%v, flashLoanReturnAmount:%v, err:%v\n", account, seizedSymbol, repaySymbol, flashLoanReturnAmount, err)
+				return err
+			}
+
+			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, VAIAddress, flashLoanReturnAmount, path1, nil)
 			if err != nil {
 				logger.Printf("processLiquidationReq case6, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
 				return err
 			}
 
-			gasFee := decimal.NewFromBigInt(bigGasPrice, 0).Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
-			path1 := s.buildVAIPaths(seizedSymbol, repaySymbol, tokens)
-			amountsIn, err := pancakeRouter.GetAmountsIn(callOptions, flashLoanReturnAmount.BigInt(), path1) //amountsIn[0] is the stablecoin needed.
-			if err != nil {
-				logger.Printf("processLiquidationReq case6, fail to get GetAmountsIn, account:%v, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
+			remain := seizedUnderlyingTokenAmount.Sub(amountIn)
+			if remain.Cmp(decimal.Zero) == -1 {
+				err := fmt.Errorf("processLiquidationReq case6, unexpected paths selected, negative remain,flashLoanReturnAmount:%v, amountIn:%v, seizedUnderlyingTokenAmount:%v, remain:%v\n", flashLoanReturnAmount, amountIn, seizedUnderlyingTokenAmount, remain)
+				logger.Printf("processLiquidationReq case6, unexpected paths selected, negative remain,flashLoanReturnAmount:%v, amountIn:%v, seizedUnderlyingTokenAmount:%v, remain:%v\n", flashLoanReturnAmount, amountIn, seizedUnderlyingTokenAmount, remain)
 				return err
 			}
 
-			remain := seizedUnderlyingTokenAmount.Sub(decimal.NewFromBigInt(amountsIn[0], 0))
+			gasFee := gasPrice.Mul(gasLimit).Mul(ethPrice).Div(EXPSACLE)
 			profit := remain.Mul(tokens[seizedSymbol].Price).Div(EXPSACLE).Sub(gasFee)
 			logger.Printf("processLiquidationReq case6: repaySymbol is VAI and seizedSymbol is stable coin\n")
 			logger.Printf("height:%v, account:%v, repaySymbol:%v, repayUnderlyingAmount:%v, seizedSymbol:%v, seizedVTokenAmount:%v, seizedUnderlyingAmount:%v, seizedValue:%v, flashLoanReturnAmout:%v, remain:%v, gasFee:%v, profit:%v\n", currentHeight, account, repaySymbol, repayAmount, seizedSymbol, seizedVTokenAmount, seizedUnderlyingTokenAmount, seizedUnderlyingTokenValue, flashLoanReturnAmount, remain, gasFee, profit.Div(EXPSACLE))
@@ -1567,7 +1560,7 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				logger.Printf("case6, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				tx, err := s.doLiquidation(big.NewInt(6), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				tx, err := s.doLiquidation(big.NewInt(6), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimit.BigInt().Uint64())
 				if err != nil {
 					logger.Printf("doLiquidation error:%v\n", err)
 					db.Put(dbm.BadLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
@@ -1577,37 +1570,40 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 					logger.Printf("tx success, hash:%v\n", tx.Hash())
 					db.Put(dbm.PendingLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
 				}
-
 			}
+			return nil
 		} else {
 			//case7, repay VAI and seizedSymbol is not stable coin. sell partly seizedSymbol to repay symbol, sell remain to usdt
 			//case7.1 repay VAI, capture wBNB,  swap wBNB to VAI, swap wBNB to USDT, flashLoan from VAI-USDT pair
 			//case7.2 repay VAI, capture wETH, swap wETH to VAI, swap wETH to USDT, flashLoan from VAI-wBNB pair
-			flashLoanFrom, err := pancakeFactory.GetPair(nil, VAIAddress, tokens["vBUSD"].UnderlyingAddress)
+			path1, amountIn, err := s.selectPathWithMinAmountIn(seizedSymbol, repaySymbol, flashLoanReturnAmount)
 			if err != nil {
-				logger.Printf("processLiquidationReq case7, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
+				logger.Printf("processLiquidationReq case7, fail to get selectPathWithMinAmountIn, account:%v, seizedSymbol:%v, repaySymbol:%v, flashLoanReturnAmount:%v, err:%v\n", account, seizedSymbol, repaySymbol, flashLoanReturnAmount, err)
 				return err
 			}
 
-			gasFee := decimal.NewFromBigInt(bigGasPrice, 0).Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
-			path1 := s.buildVAIPaths(seizedSymbol, repaySymbol, tokens)
-			amountIns, err := pancakeRouter.GetAmountsIn(callOptions, flashLoanReturnAmount.BigInt(), path1)
-			if err != nil {
-				logger.Printf("processLiquidationReq case7, fail to get GetAmountsIn, account:%V, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
+			remain := seizedUnderlyingTokenAmount.Truncate(0).Sub(amountIn)
+			if remain.Cmp(decimal.Zero) == -1 {
+				err := fmt.Errorf("processLiquidationReq case7, unexpected paths selected, negative remain,flashLoanReturnAmount:%v, amountIn:%v, seizedUnderlyingTokenAmount:%v, remain:%v\n", flashLoanReturnAmount, amountIn, seizedUnderlyingTokenAmount, remain)
+				logger.Printf("processLiquidationReq case7, unexpected paths selected, negative remain,flashLoanReturnAmount:%v, amountIn:%v, seizedUnderlyingTokenAmount:%v, remain:%v\n", flashLoanReturnAmount, amountIn, seizedUnderlyingTokenAmount, remain)
 				return err
 			}
 
-			// swap the remains to usdt
-			remain := seizedUnderlyingTokenAmount.Truncate(0).Sub(decimal.NewFromBigInt(amountIns[0], 0))
-			path2 := s.buildPaths(seizedSymbol, "vUSDT", tokens)
-			amountsOut, err := pancakeRouter.GetAmountsOut(callOptions, remain.Truncate(0).BigInt(), path2)
+			path2, amountOut, err := s.selectPathWithMaxAmountOut(seizedSymbol, ProfitSymbol, remain)
 			if err != nil {
-				logger.Printf("processLiquidationReq case7, fail to get GetAmountsOut, account:%v paths:%v, err:%v\n", account, path2, err)
+				logger.Printf("processLiquidationReq case7, fail to get selectPathWithMaxAmountOut, account:%v seizedSymbol:%v,ProfitSymbol:%v, err:%v\n", account, seizedSymbol, ProfitSymbol, err)
 				return err
 			}
 
-			usdtAmount := decimal.NewFromBigInt(amountsOut[len(amountsOut)-1], 0)
-			profit := usdtAmount.Mul(tokens["vUSDT"].Price).Div(EXPSACLE).Sub(gasFee)
+			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, VAIAddress, flashLoanReturnAmount, path1, path2)
+			if err != nil {
+				logger.Printf("processLiquidationReq case7, fail to get %v selectFlashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
+				return err
+			}
+
+			gasFee := gasPrice.Mul(gasLimit).Mul(ethPrice).Div(EXPSACLE)
+			usdtAmount := amountOut
+			profit := usdtAmount.Mul(tokens[ProfitSymbol].Price).Div(EXPSACLE).Sub(gasFee)
 
 			logger.Printf("processLiquidationReq case7: repaySymbol is VAI and seizedSymbol is not stable coin\n")
 			logger.Printf("height:%v, account:%v, repaySymbol:%v, repayUnderlyingAmount:%v, seizedSymbol:%v, seizedVTokenAmount:%v, seizedUnderlyingAmount:%v, seizedValue:%v, flashLoanReturnAmout:%v, remain:%v, gasFee:%v, profit:%v\n", currentHeight, account, repaySymbol, repayAmount, seizedSymbol, seizedVTokenAmount, seizedUnderlyingTokenAmount, seizedUnderlyingTokenValue, flashLoanReturnAmount, remain, gasFee, profit.Div(EXPSACLE))
@@ -1615,7 +1611,7 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				logger.Printf("case7: profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				tx, err := s.doLiquidation(big.NewInt(7), flashLoanFrom, path1, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				tx, err := s.doLiquidation(big.NewInt(7), flashLoanFrom, path1, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimit.BigInt().Uint64())
 				if err != nil {
 					logger.Printf("doLiquidation error:%v\n", err)
 					db.Put(dbm.BadLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
@@ -1641,7 +1637,7 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 	if seizedSymbol == repaySymbol {
 		if isStalbeCoin(seizedSymbol) {
 			//case1, seizedSymbol == repaySymbol and symbol is a stable coin
-			gasFee := gasPrice.Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
+			gasFee := gasPrice.Mul(gasLimit).Mul(ethPrice).Div(EXPSACLE)
 			remain := seizedUnderlyingTokenAmount.Sub(flashLoanReturnAmount)
 			profit := (remain.Mul(tokens[seizedSymbol].Price).Div(EXPSACLE)).Sub(gasFee)
 			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, tokens[repaySymbol].UnderlyingAddress, repayAmount, nil, nil)
@@ -1656,7 +1652,7 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				logger.Printf("case1, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				tx, err := s.doLiquidation(big.NewInt(1), flashLoanFrom, nil, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				tx, err := s.doLiquidation(big.NewInt(1), flashLoanFrom, nil, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimit.BigInt().Uint64())
 				if err != nil {
 					logger.Printf("doLiquidation error:%v\n", err)
 					db.Put(dbm.BadLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
@@ -1670,18 +1666,17 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 			}
 		} else {
 			//case2, seizedSymbol == repaySymbol and symbol is not a stable coin, after return flashloan, sell remain to usdt
-			gasFee := gasPrice.Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
+			gasFee := gasPrice.Mul(gasLimit).Mul(ethPrice).Div(EXPSACLE)
 			remain := seizedUnderlyingTokenAmount.Sub(flashLoanReturnAmount)
 
-			path2 := s.buildPaths(seizedSymbol, "vUSDT", tokens)
-			amountsOut, err := pancakeRouter.GetAmountsOut(callOptions, remain.Truncate(0).BigInt(), path2)
+			path2, amountOut, err := s.selectPathWithMaxAmountOut(seizedSymbol, ProfitSymbol, remain)
 			if err != nil {
-				logger.Printf("processLiquidationReq case2:, fail to get GetAmountsout, account:%v, paths:%v, amountIn:%v, err:%v\n", account, path2, remain.Truncate(0), err)
+				logger.Printf("processLiquidationReq case2:, fail to get selectPathWithMaxAmountOut, account:%v, seizedSymbol:%v,profitSymbol:%v, remain:%v, err:%v\n", account, seizedSymbol, ProfitSymbol, remain.Truncate(0), err)
 				return err
 			}
 
-			usdtAmount := decimal.NewFromBigInt(amountsOut[len(amountsOut)-1], 0)
-			profit := (usdtAmount.Mul(tokens["vUSDT"].Price).Div(EXPSACLE)).Sub(gasFee)
+			usdtAmount := amountOut
+			profit := (usdtAmount.Mul(tokens[ProfitSymbol].Price).Div(EXPSACLE)).Sub(gasFee)
 			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, tokens[repaySymbol].UnderlyingAddress, repayAmount, nil, path2)
 			if err != nil {
 				logger.Printf("processLiquidationReq case2, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
@@ -1694,7 +1689,7 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				logger.Printf("case2, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				tx, err := s.doLiquidation(big.NewInt(2), flashLoanFrom, nil, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				tx, err := s.doLiquidation(big.NewInt(2), flashLoanFrom, nil, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimit.BigInt().Uint64())
 				if err != nil {
 					logger.Printf("doLiquidation error:%v\n", err)
 					db.Put(dbm.BadLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
@@ -1711,16 +1706,19 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 	if isStalbeCoin(seizedSymbol) {
 		//case3, collateral(i.e. seizedSymbol) is stable coin, repaySymbol may or not be a stable coin, sell part of seized symbol to repaySymbol
-
-		gasFee := decimal.NewFromBigInt(bigGasPrice, 0).Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
-		path1 := s.buildPaths(seizedSymbol, repaySymbol, tokens)
-		amountsIn, err := pancakeRouter.GetAmountsIn(callOptions, flashLoanReturnAmount.BigInt(), path1) //amountsIn[0] is the stablecoin needed.
+		path1, amountIn, err := s.selectPathWithMinAmountIn(seizedSymbol, repaySymbol, flashLoanReturnAmount)
 		if err != nil {
-			logger.Printf("processLiquidationReq case3, fail to get GetAmountsIn, account:%v, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
+			logger.Printf("processLiquidationReq case3, fail to get selectPathWithMinAmountIn, account:%v, seizedSymbol:%v, repaySymbol:%v, flashLoanReturnAmount:%v, err:%v\n", account, seizedSymbol, repaySymbol, flashLoanReturnAmount, err)
 			return err
 		}
 
-		remain := seizedUnderlyingTokenAmount.Sub(decimal.NewFromBigInt(amountsIn[0], 0))
+		gasFee := gasPrice.Mul(gasLimit).Mul(ethPrice).Div(EXPSACLE)
+		remain := seizedUnderlyingTokenAmount.Sub(amountIn)
+		if remain.Cmp(decimal.Zero) == -1 {
+			err := fmt.Errorf("processLiquidationReq case3, unexpected paths selected, negative remain,flashLoanReturnAmount:%v, amountIn:%v, seizedUnderlyingTokenAmount:%v, remain:%v\n", flashLoanReturnAmount, amountIn, seizedUnderlyingTokenAmount, remain)
+			logger.Printf("processLiquidationReq case3, unexpected paths selected, negative remain,flashLoanReturnAmount:%v, amountIn:%v, seizedUnderlyingTokenAmount:%v, remain:%v\n", flashLoanReturnAmount, amountIn, seizedUnderlyingTokenAmount, remain)
+			return err
+		}
 		profit := remain.Mul(tokens[seizedSymbol].Price).Div(EXPSACLE).Sub(gasFee)
 		flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, tokens[repaySymbol].UnderlyingAddress, repayAmount, path1, nil)
 		if err != nil {
@@ -1734,7 +1732,7 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 		if profit.Cmp(ProfitThreshold) == 1 {
 			logger.Printf("case3, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-			tx, err := s.doLiquidation(big.NewInt(3), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+			tx, err := s.doLiquidation(big.NewInt(3), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimit.BigInt().Uint64())
 			if err != nil {
 				logger.Printf("doLiquidation error:%v\n", err)
 				db.Put(dbm.BadLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
@@ -1748,16 +1746,19 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 	} else {
 		if isStalbeCoin(repaySymbol) {
 			//case4, collateral(i.e. seizedSymbol) is not stable coin, repaySymbol is a stable coin, sell all seizedSymbol to repaySymbol
-			gasFee := decimal.NewFromBigInt(bigGasPrice, 0).Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
-
-			path1 := s.buildPaths(seizedSymbol, repaySymbol, tokens)
-			amountsOut, err := pancakeRouter.GetAmountsOut(callOptions, seizedUnderlyingTokenAmount.Truncate(0).BigInt(), path1)
+			path1, amountOut, err := s.selectPathWithMaxAmountOut(seizedSymbol, repaySymbol, seizedUnderlyingTokenAmount)
 			if err != nil {
-				logger.Printf("processLiquidationReq case4, fail to get GetAmountsIn, account:%V, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
+				logger.Printf("processLiquidationReq case4, fail to get selectPathWithMaxAmountOut, account:%V, seizedSymbol:%v,repaySymbol:%v, flashLoanReturnAmount:%v, err:%v\n", account, seizedSymbol, repaySymbol, flashLoanReturnAmount, err)
 				return err
 			}
 
-			remain := decimal.NewFromBigInt(amountsOut[len(amountsOut)-1], 0).Sub(flashLoanReturnAmount)
+			gasFee := gasPrice.Mul(gasLimit).Mul(ethPrice).Div(EXPSACLE)
+			remain := amountOut.Sub(flashLoanReturnAmount)
+			if remain.Cmp(decimal.Zero) == -1 {
+				err := fmt.Errorf("processLiquidationReq case4, unexpected paths selected, negative remain, seizedUnderlyingTokenAmount:%v, amountOut:%v, flashLoanReturnAmount:%v, remain:%v\n", seizedUnderlyingTokenAmount, amountOut, flashLoanReturnAmount, remain)
+				logger.Printf("processLiquidationReq case4, unexpected paths selected, negative remain, seizedUnderlyingTokenAmount:%v, amountOut:%v, flashLoanReturnAmount:%v, remain:%v\n", seizedUnderlyingTokenAmount, amountOut, flashLoanReturnAmount, remain)
+				return err
+			}
 			profit := remain.Mul(tokens[repaySymbol].Price).Div(EXPSACLE).Sub(gasFee)
 			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, tokens[repaySymbol].UnderlyingAddress, repayAmount, path1, nil)
 			if err != nil {
@@ -1771,7 +1772,7 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				logger.Printf("case4, profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				tx, err := s.doLiquidation(big.NewInt(4), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				tx, err := s.doLiquidation(big.NewInt(4), flashLoanFrom, path1, nil, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimit.BigInt().Uint64())
 				if err != nil {
 					logger.Printf("doLiquidation error:%v\n", err)
 					db.Put(dbm.BadLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
@@ -1784,25 +1785,26 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 			}
 		} else {
 			//case5,  collateral(i.e. seizedSymbol) and repaySymbol are not stable coin. sell partly seizedSymbol to repay symbol, sell remain to usdt
-			gasFee := decimal.NewFromBigInt(bigGasPrice, 0).Mul(bigGas).Mul(ethPrice).Div(EXPSACLE)
-			path1 := s.buildPaths(seizedSymbol, repaySymbol, tokens)
-			amountIns, err := pancakeRouter.GetAmountsIn(callOptions, flashLoanReturnAmount.BigInt(), path1)
+			path1, amountIn, err := s.selectPathWithMinAmountIn(seizedSymbol, repaySymbol, flashLoanReturnAmount)
 			if err != nil {
-				logger.Printf("processLiquidationReq case5, fail to get GetAmountsIn, account:%V, paths:%v, amountout:%v, err:%v\n", account, path1, flashLoanReturnAmount, err)
+				logger.Printf("processLiquidationReq case5, fail to get selectPathWithMinAmountIn, account:%v, seizedSymbol:%v, repaySymbol:%v, flashLoanReturnAmount:%v, err:%v\n", account, seizedSymbol, repaySymbol, flashLoanReturnAmount, err)
 				return err
 			}
-
+			remain := seizedUnderlyingTokenAmount.Truncate(0).Sub(amountIn)
+			if remain.Cmp(decimal.Zero) == -1 {
+				err := fmt.Errorf("processLiquidationReq case5, unexpected paths selected, negative remain,flashLoanReturnAmount:%v, amountIn:%v, seizedUnderlyingTokenAmount:%v, remain:%v\n", flashLoanReturnAmount, amountIn, seizedUnderlyingTokenAmount, remain)
+				logger.Printf("processLiquidationReq case5, unexpected paths selected, negative remain,flashLoanReturnAmount:%v, amountIn:%v, seizedUnderlyingTokenAmount:%v, remain:%v\n", flashLoanReturnAmount, amountIn, seizedUnderlyingTokenAmount, remain)
+				return err
+			}
 			// swap the remains to usdt
-			remain := seizedUnderlyingTokenAmount.Truncate(0).Sub(decimal.NewFromBigInt(amountIns[0], 0))
-			path2 := s.buildPaths(seizedSymbol, "vUSDT", tokens)
-			amountsOut, err := pancakeRouter.GetAmountsOut(callOptions, remain.Truncate(0).BigInt(), path2)
+			path2, amountOut, err := s.selectPathWithMaxAmountOut(seizedSymbol, ProfitSymbol, remain)
 			if err != nil {
-				logger.Printf("processLiquidationReq case5, fail to get GetAmountsOut, account:%v paths:%v, err:%v\n", account, path2, err)
+				logger.Printf("processLiquidationReq case5, fail to get selectPathWithMaxAmountOut, account:%v seizedSymbol:%v, ProfitSymbol:%v:, err:%v\n", account, seizedSymbol, ProfitSymbol, err)
 				return err
 			}
-
-			usdtAmount := decimal.NewFromBigInt(amountsOut[len(amountsOut)-1], 0)
-			profit := usdtAmount.Mul(tokens["vUSDT"].Price).Div(EXPSACLE).Sub(gasFee)
+			gasFee := gasPrice.Mul(gasLimit).Mul(ethPrice).Div(EXPSACLE)
+			usdtAmount := amountOut
+			profit := usdtAmount.Mul(tokens[ProfitSymbol].Price).Div(EXPSACLE).Sub(gasFee)
 			flashLoanFrom, err := s.selectFlashLoanFrom(repaySymbol, tokens[repaySymbol].UnderlyingAddress, repayAmount, path1, path2)
 			if err != nil {
 				logger.Printf("processLiquidationReq case2, fail to get %v flashLoanFrom, account:%v, err:%v\n", repaySymbol, account, err)
@@ -1815,7 +1817,7 @@ func (s *Syncer) processLiquidationReq(liquidation *Liquidation) error {
 
 			if profit.Cmp(ProfitThreshold) == 1 {
 				logger.Printf("case5: profitable liquidation catched:%v, profit:%v\n", liquidation, profit.Div(EXPSACLE))
-				tx, err := s.doLiquidation(big.NewInt(5), flashLoanFrom, path1, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimt)
+				tx, err := s.doLiquidation(big.NewInt(5), flashLoanFrom, path1, path2, addresses, repayAmount.BigInt(), gasPrice.BigInt(), gasLimit.BigInt().Uint64())
 				if err != nil {
 					logger.Printf("doLiquidation error:%v\n", err)
 					db.Put(dbm.BadLiquidationTxStoreKey(account.Bytes()), big.NewInt(int64(currentHeight)).Bytes(), nil)
@@ -1927,59 +1929,8 @@ func isStalbeCoin(symbol string) bool {
 	return (symbol == "vUSDT" || symbol == "vDAI" || symbol == "vBUSD")
 }
 
-func (s *Syncer) buildPaths(srcSymbol, dstSymbol string, tokens map[string]*TokenInfo) []common.Address {
-	pancakeFactory := s.pancakeFactory
-	pair, err := pancakeFactory.GetPair(nil, tokens[srcSymbol].UnderlyingAddress, tokens[dstSymbol].UnderlyingAddress)
-	if err != nil || pair.String() == "0x0000000000000000000000000000000000000000" {
-		paths := make([]common.Address, 3)
-		paths[0] = tokens[srcSymbol].UnderlyingAddress
-		paths[1] = tokens["vBNB"].UnderlyingAddress
-		paths[2] = tokens[dstSymbol].UnderlyingAddress
-		return paths
-	}
-
-	paths := make([]common.Address, 2)
-	paths[0] = tokens[srcSymbol].UnderlyingAddress
-	paths[1] = tokens[dstSymbol].UnderlyingAddress
-	return paths
-}
-
-func (s *Syncer) buildVAIPaths(srcSymbol, dstSymbol string, tokens map[string]*TokenInfo) []common.Address {
-	pancakeFactory := s.pancakeFactory
-	if srcSymbol == "VAI" {
-		pair, err := pancakeFactory.GetPair(nil, VAIAddress, tokens[dstSymbol].UnderlyingAddress)
-		if err != nil || pair.String() == "0x0000000000000000000000000000000000000000" {
-			paths := make([]common.Address, 3)
-			paths[0] = VAIAddress
-			paths[1] = tokens["vBNB"].UnderlyingAddress
-			paths[2] = tokens[dstSymbol].UnderlyingAddress
-			return paths
-		}
-
-		paths := make([]common.Address, 2)
-		paths[0] = VAIAddress
-		paths[1] = tokens[dstSymbol].UnderlyingAddress
-		return paths
-	} else if dstSymbol == "VAI" {
-		pair, err := pancakeFactory.GetPair(nil, tokens[srcSymbol].UnderlyingAddress, VAIAddress)
-		if err != nil || pair.String() == "0x0000000000000000000000000000000000000000" {
-			paths := make([]common.Address, 3)
-			paths[0] = tokens[srcSymbol].UnderlyingAddress
-			paths[1] = tokens["vBNB"].UnderlyingAddress
-			paths[2] = VAIAddress
-			return paths
-		}
-
-		paths := make([]common.Address, 2)
-		paths[0] = tokens[srcSymbol].UnderlyingAddress
-		paths[1] = VAIAddress
-		return paths
-	}
-	return nil
-}
-
 // path1: [seizedSymbol, intermediateSymbol, repaySymbol]
-// path2: [seizedSymbol, "USDT"]
+// path2: [seizedSymbol, "BUSD"]
 func (s *Syncer) selectFlashLoanFrom(repaySymbol string, repayUnderlyingAddress common.Address, repayAmount decimal.Decimal, path1 []common.Address, path2 []common.Address) (common.Address, error) {
 	var pair1, pair2 common.Address
 	var err error
@@ -2056,7 +2007,7 @@ func (s *Syncer) checkPendingLiquidation(account common.Address, currentHeight u
 	if had {
 		bz, err := db.Get(dbm.PendingLiquidationTxStoreKey(account.Bytes()), nil)
 		if err != nil {
-			logger.Printf("checkPendingLiquidation, fail to get BadLiquidationTx,err:%v\n", err)
+			logger.Printf("checkPendingLiquidation, fail to get PendingLiquidationTx,err:%v\n", err)
 			return err
 		}
 
@@ -2069,6 +2020,245 @@ func (s *Syncer) checkPendingLiquidation(account common.Address, currentHeight u
 		db.Delete(dbm.PendingLiquidationTxStoreKey(account.Bytes()), nil)
 	}
 	return nil
+}
+
+func buildFlashLoanPool(factory *venus.IPancakeFactory, c *ethclient.Client, tokens map[string]*TokenInfo) map[string][]common.Address {
+	flashLoanPool := make(map[string][]common.Address)
+	peerSymbols := []string{"vBNB", "vBUSD", "vUSDT", "vETH", "vCAKE"}
+
+	for symbol1, token1 := range tokens {
+		if symbol1 == "vCAN" {
+			continue
+		}
+
+		pairs := make([]common.Address, 0)
+		balances := make([]decimal.Decimal, 0)
+		bep20, _ := venus.NewBep20(token1.UnderlyingAddress, c)
+		for _, symbol2 := range peerSymbols {
+			pair, err := factory.GetPair(nil, token1.UnderlyingAddress, tokens[symbol2].UnderlyingAddress)
+			if err != nil || pair == common.HexToAddress("0x0000000000000000000000000000000000000000") {
+				continue
+			}
+
+			balance, err := bep20.BalanceOf(nil, pair)
+			if err != nil {
+				continue
+			}
+
+			pairs = append(pairs, pair)
+			balances = append(balances, decimal.NewFromBigInt(balance, 0))
+		}
+
+		length := len(pairs)
+		for i := 0; i < length-1; i++ {
+			for j := i + 1; j < length; j++ {
+				if balances[i].Cmp(balances[j]) == -1 {
+					balances[i], balances[j] = balances[j], balances[i]
+					pairs[i], pairs[j] = pairs[j], pairs[i]
+				}
+			}
+		}
+		flashLoanPool[symbol1] = pairs
+	}
+
+	//{
+	//	symbol1 := "VAI"
+	//	pairs := make([]common.Address, 0)
+	//	balances := make([]decimal.Decimal, 0)
+	//	bep20, _ := venus.NewBep20(VAIAddress, c)
+	//	for _, symbol2 := range peerSymbols {
+	//		pair, err := factory.GetPair(nil, VAIAddress, tokens[symbol2].UnderlyingAddress)
+	//		if err != nil || pair == common.HexToAddress("0x0000000000000000000000000000000000000000") {
+	//			continue
+	//		}
+	//
+	//		balance, err := bep20.BalanceOf(nil, pair)
+	//		if err != nil {
+	//			continue
+	//		}
+	//
+	//		pairs = append(pairs, pair)
+	//		balances = append(balances, decimal.NewFromBigInt(balance, 0))
+	//	}
+	//
+	//	length := len(pairs)
+	//	for i := 0; i < length-1; i++ {
+	//		for j := i + 1; j < length; j++ {
+	//			if balances[i].Cmp(balances[j]) == -1 {
+	//				balances[i], balances[j] = balances[j], balances[i]
+	//				pairs[i], pairs[j] = pairs[j], pairs[i]
+	//			}
+	//		}
+	//	}
+	//	flashLoanPool[symbol1] = pairs
+	//}
+	return flashLoanPool
+}
+
+func buildPaths(router *venus.IPancakeRouter02, tokens map[string]*TokenInfo) map[string][][]common.Address {
+	candidatePaths := make([][]common.Address, 4)
+	paths := make(map[string][][]common.Address, 0)
+
+	amountIn := decimal.New(1000, 18).BigInt()
+
+	for srcSymbol, srcToken := range tokens {
+		for dstSymbol, dstToken := range tokens {
+			if srcSymbol == dstSymbol || srcSymbol == "vCAN" || dstSymbol == "vCAN" {
+				continue
+			}
+
+			amountOuts := make([][]*big.Int, 0)
+			pathSet := make([][]common.Address, 0)
+			candidatePaths[0] = []common.Address{srcToken.UnderlyingAddress, dstToken.UnderlyingAddress}
+			candidatePaths[1] = []common.Address{srcToken.UnderlyingAddress, tokens["vBNB"].UnderlyingAddress, dstToken.UnderlyingAddress}
+			candidatePaths[2] = []common.Address{srcToken.UnderlyingAddress, tokens["vBUSD"].UnderlyingAddress, dstToken.UnderlyingAddress}
+			candidatePaths[3] = []common.Address{srcToken.UnderlyingAddress, tokens["vUSDT"].UnderlyingAddress, dstToken.UnderlyingAddress}
+
+			for i := 0; i < 4; i++ {
+				candidateAmountsOut, err := router.GetAmountsOut(nil, amountIn, candidatePaths[i])
+				if err == nil && candidateAmountsOut[len(candidatePaths[i])-1].Cmp(BigZero) == 1 {
+					pathSet = append(pathSet, candidatePaths[i])
+					amountOuts = append(amountOuts, candidateAmountsOut)
+				}
+			}
+
+			for i := 0; i < len(pathSet)-1; i++ {
+				for j := i + 1; j < len(pathSet); j++ {
+					ilen := len(amountOuts[i])
+					jLen := len(amountOuts[j])
+
+					if amountOuts[i][ilen-1].Cmp(amountOuts[j][jLen-1]) == -1 {
+						amountOuts[i], amountOuts[j] = amountOuts[j], amountOuts[i]
+						pathSet[i], pathSet[j] = pathSet[j], pathSet[i]
+					}
+				}
+			}
+			paths[srcSymbol+":"+dstSymbol] = pathSet
+		}
+	}
+
+	//{
+	//	srcSymbol := "VAI"
+	//	for dstSymbol, dstToken := range tokens {
+	//		if srcSymbol == dstSymbol || srcSymbol == "vCAN" || dstSymbol == "vCAN" {
+	//			continue
+	//		}
+	//
+	//		amountOuts := make([][]*big.Int, 0)
+	//		pathSet := make([][]common.Address, 0)
+	//		candidatePaths[0] = []common.Address{VAIAddress, dstToken.UnderlyingAddress}
+	//		candidatePaths[1] = []common.Address{VAIAddress, tokens["vBNB"].UnderlyingAddress, dstToken.UnderlyingAddress}
+	//		candidatePaths[2] = []common.Address{VAIAddress, tokens["vBUSD"].UnderlyingAddress, dstToken.UnderlyingAddress}
+	//		candidatePaths[3] = []common.Address{VAIAddress, tokens["vUSDT"].UnderlyingAddress, dstToken.UnderlyingAddress}
+	//
+	//		for i := 0; i < 4; i++ {
+	//			candidateAmountsOut, err := router.GetAmountsOut(nil, amountIn, candidatePaths[i])
+	//			if err == nil && candidateAmountsOut[len(candidatePaths[i])-1].Cmp(BigZero) == 1 {
+	//				pathSet = append(pathSet, candidatePaths[i])
+	//				amountOuts = append(amountOuts, candidateAmountsOut)
+	//			}
+	//		}
+	//
+	//		for i := 0; i < len(pathSet)-1; i++ {
+	//			for j := i + 1; j < len(pathSet); j++ {
+	//				ilen := len(amountOuts[i])
+	//				jLen := len(amountOuts[j])
+	//
+	//				if amountOuts[i][ilen-1].Cmp(amountOuts[j][jLen-1]) == -1 {
+	//					amountOuts[i], amountOuts[j] = amountOuts[j], amountOuts[i]
+	//					pathSet[i], pathSet[j] = pathSet[j], pathSet[i]
+	//				}
+	//			}
+	//		}
+	//		paths[srcSymbol+":"+dstSymbol] = pathSet
+	//	}
+	//}
+	//{
+	//	dstSymbol := "VAI"
+	//	for srcSymbol, srcToken := range tokens {
+	//		if srcSymbol == dstSymbol || srcSymbol == "vCAN" || dstSymbol == "vCAN" {
+	//			continue
+	//		}
+	//
+	//		amountOuts := make([][]*big.Int, 0)
+	//		pathSet := make([][]common.Address, 0)
+	//		candidatePaths[0] = []common.Address{srcToken.UnderlyingAddress, VAIAddress}
+	//		candidatePaths[1] = []common.Address{srcToken.UnderlyingAddress, tokens["vBNB"].UnderlyingAddress, VAIAddress}
+	//		candidatePaths[2] = []common.Address{srcToken.UnderlyingAddress, tokens["vBUSD"].UnderlyingAddress, VAIAddress}
+	//		candidatePaths[3] = []common.Address{srcToken.UnderlyingAddress, tokens["vUSDT"].UnderlyingAddress, VAIAddress}
+	//
+	//		for i := 0; i < 4; i++ {
+	//			candidateAmountsOut, err := router.GetAmountsOut(nil, amountIn, candidatePaths[i])
+	//			if err == nil && candidateAmountsOut[len(candidatePaths[i])-1].Cmp(BigZero) == 1 {
+	//				pathSet = append(pathSet, candidatePaths[i])
+	//				amountOuts = append(amountOuts, candidateAmountsOut)
+	//			}
+	//		}
+	//
+	//		for i := 0; i < len(pathSet)-1; i++ {
+	//			for j := i + 1; j < len(pathSet); j++ {
+	//				ilen := len(amountOuts[i])
+	//				jLen := len(amountOuts[j])
+	//
+	//				if amountOuts[i][ilen-1].Cmp(amountOuts[j][jLen-1]) == -1 {
+	//					amountOuts[i], amountOuts[j] = amountOuts[j], amountOuts[i]
+	//					pathSet[i], pathSet[j] = pathSet[j], pathSet[i]
+	//				}
+	//			}
+	//		}
+	//		paths[srcSymbol+":"+dstSymbol] = pathSet
+	//	}
+	//}
+
+	return paths
+}
+
+func (s *Syncer) selectPathWithMaxAmountOut(srcSymbol, dstSymbol string, amountIn decimal.Decimal) ([]common.Address, decimal.Decimal, error) {
+	paths := s.paths[srcSymbol+":"+dstSymbol]
+	maxAmountOut := decimal.Zero
+	var selected []common.Address
+
+	for _, path := range paths {
+		bigAmountsOut, err := s.pancakeRouter.GetAmountsOut(nil, amountIn.Truncate(0).BigInt(), path)
+		if err != nil {
+			continue
+		}
+
+		if decimal.NewFromBigInt(bigAmountsOut[len(bigAmountsOut)-1], 0).Cmp(maxAmountOut) == 1 {
+			maxAmountOut = decimal.NewFromBigInt(bigAmountsOut[len(bigAmountsOut)-1], 0)
+			selected = path
+		}
+	}
+	if maxAmountOut.Cmp(decimal.Zero) == 0 {
+		err := fmt.Errorf("%v:%v has no selectPathWithMaxAmountOut with amountIn:%v path", srcSymbol, dstSymbol, amountIn)
+		return []common.Address{}, decimal.Zero, err
+	}
+	return selected, maxAmountOut, nil
+}
+
+func (s *Syncer) selectPathWithMinAmountIn(srcSymbol, dstSymbol string, amountOut decimal.Decimal) ([]common.Address, decimal.Decimal, error) {
+	paths := s.paths[srcSymbol+":"+dstSymbol]
+
+	minAmountIn := DecimalMax
+	var selected []common.Address
+
+	for _, path := range paths {
+		bigAmountsIn, err := s.pancakeRouter.GetAmountsIn(nil, amountOut.Truncate(0).BigInt(), path)
+		if err != nil {
+			continue
+		}
+
+		if decimal.NewFromBigInt(bigAmountsIn[0], 0).Cmp(minAmountIn) == -1 {
+			minAmountIn = decimal.NewFromBigInt(bigAmountsIn[0], 0)
+			selected = path
+		}
+	}
+	if minAmountIn.Cmp(DecimalMax) == 0 {
+		err := fmt.Errorf("%v:%v has no selectPathWithMinAmountIn with amountOut:%v path", srcSymbol, dstSymbol, amountOut)
+		return []common.Address{}, DecimalMax, err
+	}
+
+	return selected, minAmountIn, nil
 }
 
 //situcation： 情况 1-7
@@ -2101,8 +2291,6 @@ func (s *Syncer) doLiquidation(scenarioNo *big.Int, flashLoanFrom common.Address
 	auth.GasPrice = gasPrice
 	auth.GasLimit = gasLimit
 
-	logger.Printf("send dummy liquidation\n")
-	return nil, nil
 	tx, err := s.liquidator.Qingsuan(auth, scenarioNo, flashLoanFrom, path1, path2, tokens, flashLoanAmount)
 	if err != nil {
 		return nil, err
@@ -2115,8 +2303,8 @@ func (s *Syncer) doLiquidation(scenarioNo *big.Int, flashLoanFrom common.Address
 	return tx, nil
 }
 
-func (info *AccountInfo) toReadable() ReadableAccountInfo {
-	readableInfo := ReadableAccountInfo{}
+func (info *AccountInfo) toReadable() AccountInfo {
+	readableInfo := AccountInfo{}
 	readableInfo.HealthFactor = info.HealthFactor
 	readableInfo.MaxLoanValue = info.MaxLoanValue.Div(EXPSACLE)
 
@@ -2134,11 +2322,9 @@ func (info *AccountInfo) toReadable() ReadableAccountInfo {
 	return readableInfo
 }
 
-func (info *ConcernedAccountInfo) toReadable() ReadableConcernedAccountInfo {
-	readableInfo := ReadableConcernedAccountInfo{}
-	readableInfo.FeededPrices = info.FeededPrices
-	readableInfo.Address = info.Address
-	readableInfo.BlockNumber = info.BlockNumber
-	readableInfo.Info = info.Info.toReadable()
+func (info *ConcernedAccountInfo) toReadable() ConcernedAccountInfo {
+	readableInfo := ConcernedAccountInfo{}
+	readableInfo.FeededPrice = info.FeededPrice
+	readableInfo.AccInfo = info.AccInfo.toReadable()
 	return readableInfo
 }
