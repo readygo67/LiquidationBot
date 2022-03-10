@@ -47,11 +47,7 @@ func Start(cfg *config.Config) error {
 		panic(err)
 	}
 
-	liquidationCh := make(chan *Liquidation, 64)
-	priorityliquidationCh := make(chan *Liquidation, 64)
-	feededPricesCh := make(chan *FeededPrices, 64)
-
-	syncer := NewSyncer(client, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
+	syncer := NewSyncer(client, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey)
 
 	syncer.Start()
 

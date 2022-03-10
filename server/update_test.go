@@ -98,9 +98,9 @@ func TestDeleteAllKeysExceptBorrowers(t *testing.T) {
 
 	//liquidationCh := make(chan *Liquidation, 64)
 	//priorityliquidationCh := make(chan *Liquidation, 64)
-	//feededPricesCh := make(chan *FeededPrices, 64)
+	//feededPriceCh := make(chan *FeededPrices, 64)
 	//
-	//syncer := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
+	//syncer := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPriceCh, liquidationCh, priorityliquidationCh)
 	//logger.Printf("db:%v", syncer.db)
 	/*
 		AccountPrefix              = []byte("account")
@@ -210,11 +210,7 @@ func TestRebuildDB(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	liquidationCh := make(chan *Liquidation, 64)
-	priorityliquidationCh := make(chan *Liquidation, 64)
-	feededPricesCh := make(chan *FeededPrices, 64)
-
-	syncer := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
+	syncer := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey)
 	logger.Printf("db:%v", syncer.db)
 
 	var addresses []common.Address
@@ -231,7 +227,6 @@ func TestRebuildDB(t *testing.T) {
 }
 
 func TestDeleteAllNonProfitAccounts(t *testing.T) {
-
 	db, err := dbm.NewDB("../bin/maindb")
 	require.NoError(t, err)
 	defer db.Close()

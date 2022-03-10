@@ -23,11 +23,7 @@ func TestSyncOneAccountWithFeededPrices2(t *testing.T) {
 	defer db.Close()
 	defer os.RemoveAll("testdb1")
 
-	liquidationCh := make(chan *Liquidation, 64)
-	priorityliquidationCh := make(chan *Liquidation, 64)
-	feededPricesCh := make(chan *FeededPrices, 64)
-
-	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey, feededPricesCh, liquidationCh, priorityliquidationCh)
+	sync := NewSyncer(c, db, cfg.Comptroller, cfg.Oracle, cfg.PancakeRouter, cfg.Liquidator, cfg.PrivateKey)
 	account := common.HexToAddress("0xDfBe18F35cD3FC6B9CBd3B643b110889635b1Ee9") //0x03CB27196B92B3b6B8681dC00C30946E0DB0EA7B
 	accountBytes := account.Bytes()
 	err = sync.syncOneAccount(account)
@@ -81,7 +77,7 @@ func TestSyncOneAccountWithFeededPrices2(t *testing.T) {
 	go sync.SyncMarketsAndPricesLoop()
 	go sync.BackgroundSyncLoop()
 	go sync.MonitorTxPoolLoop()
-	go sync.ProcessFeededPricesLoop()
+	go sync.ProcessFeededPriceLoop()
 	go sync.PrintConcernedAccountInfoLoop()
 
 	waitExit()
